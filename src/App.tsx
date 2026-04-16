@@ -1,4 +1,3 @@
-import React from 'react';
 import { Zap, Github, Twitter, MessageCircle, TrendingUp, Shield, Droplets } from 'lucide-react';
 import { WalletConnect } from './components/WalletConnect';
 import { SwapInterface } from './components/SwapInterface';
