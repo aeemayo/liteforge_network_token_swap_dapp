@@ -7,7 +7,7 @@ import { useTokens } from './hooks/useTokens';
 
 function App() {
   const { wallet, connecting, error, connect, disconnect } = useWallet();
-  const { availableTokens, addCustomToken, addingToken } = useTokens(
+  const { availableTokens } = useTokens(
     wallet.connected,
     wallet.address,
     wallet.chainId
@@ -76,7 +76,7 @@ function App() {
             Trade Tokens Instantly
           </h2>
           <p className="text-xl text-[#A3A3A3] max-w-2xl mx-auto">
-            Start with zkLTC, then add any deployed Liteforge ERC-20 token by address to swap with minimal fees
+            Start with zkLTC and automatically sync wallet-tracked Liteforge tokens for fast swaps
           </p>
         </div>
 
@@ -116,8 +116,6 @@ function App() {
             connected={wallet.connected}
             walletAddress={wallet.address}
             tokens={availableTokens}
-            onAddToken={addCustomToken}
-            addingToken={addingToken}
           />
         </div>
 

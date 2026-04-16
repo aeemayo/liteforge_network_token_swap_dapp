@@ -1,13 +1,11 @@
 import React, { useState } from 'react';
-import { Search, Plus, ChevronDown, Loader2 } from 'lucide-react';
+import { Search, ChevronDown } from 'lucide-react';
 import { Token } from '../utils/tokens';
 
 interface TokenSelectorProps {
   selectedToken: Token | null;
   onSelect: (token: Token) => void;
   tokens: Token[];
-  onAddToken: (tokenAddress: string, logoUrl?: string) => Promise<void>;
-  addingToken: boolean;
   excludeToken?: Token | null;
 }
 
@@ -15,16 +13,10 @@ export const TokenSelector: React.FC<TokenSelectorProps> = ({
   selectedToken,
   onSelect,
   tokens,
-  onAddToken,
-  addingToken,
   excludeToken,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [tokenAddressInput, setTokenAddressInput] = useState('');
-  const [logoUrlInput, setLogoUrlInput] = useState('');
-  const [addTokenError, setAddTokenError] = useState<string | null>(null);
 
   const filteredTokens = tokens.filter(
     token =>
@@ -37,24 +29,6 @@ export const TokenSelector: React.FC<TokenSelectorProps> = ({
     onSelect(token);
     setIsOpen(false);
     setSearchQuery('');
-  };
-
-  const handleAddToken = async () => {
-    if (!tokenAddressInput.trim()) {
-      setAddTokenError('Token address is required');
-      return;
-    }
-
-    try {
-      setAddTokenError(null);
-      await onAddToken(tokenAddressInput.trim(), logoUrlInput.trim());
-      setTokenAddressInput('');
-      setLogoUrlInput('');
-      setShowAddForm(false);
-      setSearchQuery('');
-    } catch (err) {
-      setAddTokenError(err instanceof Error ? err.message : 'Failed to add token');
-    }
   };
 
   return (
@@ -122,55 +96,6 @@ export const TokenSelector: React.FC<TokenSelectorProps> = ({
               {filteredTokens.length === 0 && (
                 <div className="px-4 py-8 text-center text-[#A3A3A3]">
                   No tokens found
-                </div>
-              )}
-            </div>
-
-            <div className="border-t border-[#2F2F2F] p-3 space-y-3">
-              <button
-                onClick={() => {
-                  setShowAddForm((prev) => !prev);
-                  setAddTokenError(null);
-                }}
-                className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-[#171717] hover:bg-[#1f1f1f] rounded-lg border border-[#2F2F2F] text-sm text-[#A3A3A3]"
-              >
-                <Plus className="w-4 h-4" />
-                Add token by address
-              </button>
-
-              {showAddForm && (
-                <div className="space-y-2">
-                  <input
-                    type="text"
-                    value={tokenAddressInput}
-                    onChange={(e) => setTokenAddressInput(e.target.value)}
-                    placeholder="Token contract address"
-                    className="w-full px-3 py-2 bg-[#171717] text-[#FFFFFF] rounded-lg border border-[#2F2F2F] focus:outline-none focus:border-[#9E7FFF]"
-                  />
-                  <input
-                    type="text"
-                    value={logoUrlInput}
-                    onChange={(e) => setLogoUrlInput(e.target.value)}
-                    placeholder="Logo URL (optional)"
-                    className="w-full px-3 py-2 bg-[#171717] text-[#FFFFFF] rounded-lg border border-[#2F2F2F] focus:outline-none focus:border-[#9E7FFF]"
-                  />
-
-                  {addTokenError && <p className="text-xs text-[#ef4444]">{addTokenError}</p>}
-
-                  <button
-                    onClick={handleAddToken}
-                    disabled={addingToken}
-                    className="w-full px-3 py-2 bg-gradient-to-r from-[#9E7FFF] to-[#38bdf8] text-white rounded-lg text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                  >
-                    {addingToken ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Adding token...
-                      </>
-                    ) : (
-                      'Add Token'
-                    )}
-                  </button>
                 </div>
               )}
             </div>

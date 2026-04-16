@@ -9,16 +9,12 @@ interface SwapInterfaceProps {
   connected: boolean;
   walletAddress: string | null;
   tokens: Token[];
-  onAddToken: (tokenAddress: string, logoUrl?: string) => Promise<void>;
-  addingToken: boolean;
 }
 
 export const SwapInterface: React.FC<SwapInterfaceProps> = ({
   connected,
   walletAddress,
   tokens,
-  onAddToken,
-  addingToken,
 }) => {
   const {
     tokenIn,
@@ -146,8 +142,6 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
               selectedToken={tokenIn}
               onSelect={setTokenIn}
               tokens={tokens}
-              onAddToken={onAddToken}
-              addingToken={addingToken}
               excludeToken={tokenOut}
             />
           </div>
@@ -186,8 +180,6 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
               selectedToken={tokenOut}
               onSelect={setTokenOut}
               tokens={tokens}
-              onAddToken={onAddToken}
-              addingToken={addingToken}
               excludeToken={tokenIn}
             />
           </div>
