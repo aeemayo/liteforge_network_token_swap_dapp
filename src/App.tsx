@@ -6,7 +6,7 @@ import { LiquidityPool } from './components/LiquidityPool';
 import { useWallet } from './hooks/useWallet';
 
 function App() {
-  const { wallet, connecting, connect, disconnect } = useWallet();
+  const { wallet, connecting, error, connect, disconnect } = useWallet();
 
   return (
     <div className="min-h-screen bg-[#171717] text-[#FFFFFF] relative overflow-hidden">
@@ -109,6 +109,12 @@ function App() {
         <div id="swap" className="flex justify-center mb-12">
           <SwapInterface connected={wallet.connected} />
         </div>
+
+        {error && (
+          <div className="max-w-2xl mx-auto mb-10 p-4 bg-[#ef4444] bg-opacity-10 border border-[#ef4444] rounded-xl text-sm text-[#ef4444]">
+            {error}
+          </div>
+        )}
 
         {/* Liquidity Pools */}
         <div id="pools" className="flex justify-center">
