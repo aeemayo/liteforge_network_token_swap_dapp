@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Token } from '../utils/tokens';
-import { getSwapQuote, executeSwap, SwapQuote } from '../utils/web3';
+import { getSwapQuote, executeSwap, SwapExecutionStatus, SwapQuote } from '../utils/web3';
 
 export const useSwap = () => {
   const [tokenIn, setTokenIn] = useState<Token | null>(null);
@@ -9,6 +9,7 @@ export const useSwap = () => {
   const [quote, setQuote] = useState<SwapQuote | null>(null);
   const [loading, setLoading] = useState(false);
   const [swapping, setSwapping] = useState(false);
+  const [swapStatus, setSwapStatus] = useState<SwapExecutionStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -42,8 +43,11 @@ export const useSwap = () => {
 
     try {
       setSwapping(true);
+      setSwapStatus('checking-allowance');
       setError(null);
-      const result = await executeSwap(tokenIn, tokenOut, amountIn, quote.minimumReceived);
+      const result = await executeSwap(tokenIn, tokenOut, amountIn, quote.minimumReceived, {
+        onStatusChange: setSwapStatus,
+      });
       
       if (!result.success) {
         throw new Error('Transaction failed');
@@ -56,6 +60,7 @@ export const useSwap = () => {
       throw new Error(errorMessage);
     } finally {
       setSwapping(false);
+      setSwapStatus(null);
     }
   };
 
@@ -73,6 +78,7 @@ export const useSwap = () => {
     quote,
     loading,
     swapping,
+    swapStatus,
     error,
     setTokenIn,
     setTokenOut,

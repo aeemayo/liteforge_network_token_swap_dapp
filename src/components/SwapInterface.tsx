@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ArrowDownUp, Loader2, AlertCircle, CheckCircle2, TrendingUp, Zap } from 'lucide-react';
 import { TokenSelector } from './TokenSelector';
 import { useSwap } from '../hooks/useSwap';
-import { LITEFORGE_TOKENS } from '../utils/tokens';
+import { getExplorerTxUrl } from '../utils/web3';
 
 interface SwapInterfaceProps {
   connected: boolean;
@@ -16,6 +16,7 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({ connected }) => {
     quote,
     loading,
     swapping,
+    swapStatus,
     error,
     setTokenIn,
     setTokenOut,
@@ -40,6 +41,20 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({ connected }) => {
   };
 
   const canSwap = connected && tokenIn && tokenOut && amountIn && quote && !loading && !swapping;
+  const explorerUrl = txHash ? getExplorerTxUrl(txHash) : null;
+
+  const pendingLabel = (() => {
+    if (swapStatus === 'approving') {
+      return 'Approval transaction pending...';
+    }
+    if (swapStatus === 'swapping') {
+      return 'Swap transaction pending...';
+    }
+    if (swapStatus === 'checking-allowance') {
+      return 'Checking token allowance...';
+    }
+    return 'Preparing transaction...';
+  })();
 
   return (
     <div className="w-full max-w-lg">
@@ -148,6 +163,13 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({ connected }) => {
           </div>
         )}
 
+        {swapping && (
+          <div className="mt-4 p-4 bg-[#38bdf8] bg-opacity-10 border border-[#38bdf8] rounded-xl flex items-center gap-2">
+            <Loader2 className="w-5 h-5 text-[#38bdf8] animate-spin flex-shrink-0" />
+            <span className="text-sm text-[#38bdf8]">{pendingLabel}</span>
+          </div>
+        )}
+
         {/* Success Message */}
         {showSuccess && txHash && (
           <div className="mt-4 p-4 bg-[#10b981] bg-opacity-10 border border-[#10b981] rounded-xl">
@@ -158,6 +180,16 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({ connected }) => {
             <div className="text-xs text-[#A3A3A3] font-mono break-all">
               Tx: {txHash}
             </div>
+            {explorerUrl && (
+              <a
+                href={explorerUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block mt-3 text-xs text-[#10b981] hover:text-[#34d399] underline"
+              >
+                View transaction on explorer
+              </a>
+            )}
           </div>
         )}
 

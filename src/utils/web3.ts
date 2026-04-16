@@ -14,6 +14,12 @@ export interface SwapQuote {
   minimumReceived: string;
 }
 
+export type SwapExecutionStatus = 'checking-allowance' | 'approving' | 'swapping';
+
+interface SwapExecutionOptions {
+  onStatusChange?: (status: SwapExecutionStatus) => void;
+}
+
 type EthereumProvider = {
   request: (args: { method: string; params?: unknown[] | object }) => Promise<unknown>;
   on: (event: 'accountsChanged' | 'chainChanged', handler: (payload: unknown) => void) => void;
@@ -32,7 +38,12 @@ const DEFAULT_SLIPPAGE_BPS = 50; // 0.5%
 const SWAP_CONTRACT_ABI = [
   'function getSwapQuote(address tokenIn, address tokenOut, uint256 amountIn) view returns (uint256 amountOut, uint256 fee)',
   'function getReserves(address tokenA, address tokenB) view returns (uint256 reserveA, uint256 reserveB)',
-  'function swap(address tokenIn, address tokenOut, uint256 amountIn) returns (uint256 amountOut)',
+  'function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut) returns (uint256 amountOut)',
+] as const;
+
+const ERC20_ABI = [
+  'function allowance(address owner, address spender) view returns (uint256)',
+  'function approve(address spender, uint256 amount) returns (bool)',
 ] as const;
 
 const requireEthereumProvider = (): EthereumProvider => {
@@ -69,6 +80,11 @@ const getSwapContractAddress = (): string => {
   return address;
 };
 
+const getExplorerTxBaseUrl = (): string | null => {
+  const baseUrl = import.meta.env.VITE_EXPLORER_TX_URL;
+  return baseUrl ? baseUrl.trim() : null;
+};
+
 const toDisplayAmount = (value: bigint, decimals: number, precision = 6): string => {
   const formatted = Number.parseFloat(ethers.formatUnits(value, decimals));
   if (!Number.isFinite(formatted)) {
@@ -93,6 +109,20 @@ const getWalletAddress = async (): Promise<string | null> => {
 
   const firstAccount = accounts[0];
   return typeof firstAccount === 'string' ? firstAccount : null;
+};
+
+export const getExplorerTxUrl = (txHash: string): string | null => {
+  const baseUrl = getExplorerTxBaseUrl();
+  if (!baseUrl) {
+    return null;
+  }
+
+  if (baseUrl.includes('{txHash}')) {
+    return baseUrl.replace('{txHash}', txHash);
+  }
+
+  const normalizedBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+  return `${normalizedBase}${txHash}`;
 };
 
 export const getCurrentWalletState = async (): Promise<WalletState> => {
@@ -256,7 +286,8 @@ export const executeSwap = async (
   tokenIn: Token,
   tokenOut: Token,
   amountIn: string,
-  minimumExpectedAmountOut: string
+  minimumExpectedAmountOut: string,
+  options?: SwapExecutionOptions
 ): Promise<{ txHash: string; success: boolean }> => {
   const amountInNum = Number.parseFloat(amountIn);
   if (!Number.isFinite(amountInNum) || amountInNum <= 0) {
@@ -281,20 +312,36 @@ export const executeSwap = async (
   const ethereum = requireEthereumProvider();
   const provider = new ethers.BrowserProvider(ethereum);
   const signer = await provider.getSigner();
+  const signerAddress = await signer.getAddress();
   const contractAddress = getSwapContractAddress();
   const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, signer);
 
   const amountInWei = ethers.parseUnits(amountIn, tokenIn.decimals);
   const minimumExpectedOutWei = ethers.parseUnits(minimumExpectedAmountOut, tokenOut.decimals);
+  options?.onStatusChange?.('checking-allowance');
+
+  const tokenInContract = new ethers.Contract(tokenIn.address, ERC20_ABI, signer);
+  const currentAllowance = await tokenInContract.allowance(signerAddress, contractAddress) as bigint;
+
+  if (currentAllowance < amountInWei) {
+    options?.onStatusChange?.('approving');
+    const approveTx = await tokenInContract.approve(contractAddress, ethers.MaxUint256);
+    const approveReceipt = await approveTx.wait();
+    if (!approveReceipt || approveReceipt.status !== 1) {
+      throw new Error('Approval transaction failed');
+    }
+  }
+
   const currentQuote = await swapContract.getSwapQuote(tokenIn.address, tokenOut.address, amountInWei) as [bigint, bigint];
   const currentOutWei = currentQuote[0];
 
-  // The contract does not support minOut in swap(); perform client-side protection pre-broadcast.
+  // Protect users from stale quotes before broadcasting.
   if (currentOutWei < minimumExpectedOutWei) {
     throw new Error('Quote moved below minimum expected output. Refresh quote and try again.');
   }
 
-  const tx = await swapContract.swap(tokenIn.address, tokenOut.address, amountInWei);
+  options?.onStatusChange?.('swapping');
+  const tx = await swapContract.swap(tokenIn.address, tokenOut.address, amountInWei, minimumExpectedOutWei);
   const receipt = await tx.wait();
 
   if (!receipt || receipt.status !== 1) {

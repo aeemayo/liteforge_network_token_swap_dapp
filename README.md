@@ -19,9 +19,13 @@ It is designed to feel simple for first-time users while still looking and behav
 
 ## Current product status
 
-This version is a functional product demo.
+This version is a functional dApp prototype with live wallet and contract wiring.
 
-Wallet connection, balances, quotes, and swap execution are currently simulated in src/utils/web3.ts so the flow can be tested end to end without chain dependencies.
+- Wallet connection is real (EIP-1193 compatible wallets)
+- Quote reads are on-chain via LiteforgeSwap.getSwapQuote
+- Swap execution is on-chain with allowance checks and approval flow
+
+Note: Liquidity dashboard cards and token balances are still placeholder UI values.
 
 ## Why this project matters
 
@@ -38,6 +42,18 @@ npm run dev
 
 Then open the local URL shown in your terminal (typically http://localhost:5173).
 
+## Environment variables
+
+Configure these values in .env:
+
+```bash
+VITE_SWAP_CONTRACT_ADDRESS=0xYourDeployedSwapContract
+VITE_LITEFORGE_CHAIN_ID=1337
+VITE_EXPLORER_TX_URL=https://explorer.example/tx/{txHash}
+```
+
+If VITE_EXPLORER_TX_URL does not contain {txHash}, the app appends the hash to the end of the URL.
+
 ## Scripts
 
 ```bash
@@ -49,7 +65,7 @@ npm run lint
 
 ## Next product milestones
 
-- Replace simulated web3 functions with real wallet and RPC integration
-- Connect UI actions to deployed swap contracts
-- Add transaction history, slippage controls, and clearer failure states
+- Wire live ERC-20 balances into the swap form
+- Replace static liquidity pool cards with on-chain pool analytics
+- Add transaction history and richer slippage configuration
 - Add integration tests for critical swap flows

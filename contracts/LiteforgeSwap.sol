@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+interface IERC20 {
+    function transfer(address to, uint256 amount) external returns (bool);
+    function transferFrom(address from, address to, uint256 amount) external returns (bool);
+}
+
 /**
  * @title LiteforgeSwap
  * @notice Decentralized exchange for swapping tokens on the Liteforge network
@@ -137,6 +142,9 @@ contract LiteforgeSwap {
         }
         
         require(liquidity > 0, "Insufficient liquidity minted");
+
+        require(IERC20(tokenA).transferFrom(msg.sender, address(this), amountA), "TokenA transfer failed");
+        require(IERC20(tokenB).transferFrom(msg.sender, address(this), amountB), "TokenB transfer failed");
         
         // Update reserves
         reserves[tokenA][tokenB] += amountA;
@@ -184,6 +192,9 @@ contract LiteforgeSwap {
         // Update reserves
         reserves[tokenA][tokenB] -= amountA;
         reserves[tokenB][tokenA] -= amountB;
+
+        require(IERC20(tokenA).transfer(msg.sender, amountA), "TokenA transfer failed");
+        require(IERC20(tokenB).transfer(msg.sender, amountB), "TokenB transfer failed");
         
         // Update liquidity tracking
         liquidityBalance[msg.sender] -= liquidity;
@@ -197,12 +208,14 @@ contract LiteforgeSwap {
      * @param tokenIn Address of input token
      * @param tokenOut Address of output token
      * @param amountIn Amount of input token
+     * @param minAmountOut Minimum output amount accepted
      * @return amountOut Amount of output token received
      */
     function swap(
         address tokenIn,
         address tokenOut,
-        uint256 amountIn
+        uint256 amountIn,
+        uint256 minAmountOut
     ) external nonReentrant returns (uint256 amountOut) {
         require(supportedTokens[tokenIn] && supportedTokens[tokenOut], "Token not supported");
         require(tokenIn != tokenOut, "Cannot swap same token");
@@ -223,6 +236,10 @@ contract LiteforgeSwap {
         
         require(amountOut > 0, "Insufficient output amount");
         require(amountOut < reserveOut, "Insufficient liquidity for swap");
+        require(amountOut >= minAmountOut, "Slippage exceeded");
+
+        require(IERC20(tokenIn).transferFrom(msg.sender, address(this), amountIn), "Input transfer failed");
+        require(IERC20(tokenOut).transfer(msg.sender, amountOut), "Output transfer failed");
         
         // Update reserves
         reserves[tokenIn][tokenOut] += amountIn;
