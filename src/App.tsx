@@ -1,4 +1,4 @@
-import { Zap, Github, Twitter, MessageCircle, TrendingUp, Shield, Droplets } from 'lucide-react';
+import { Zap, Github, Twitter, MessageCircle, TrendingUp, Shield, Droplets, Loader2, CheckCircle } from 'lucide-react';
 import { WalletConnect } from './components/WalletConnect';
 import { SwapInterface } from './components/SwapInterface';
 import { LiquidityPool } from './components/LiquidityPool';
@@ -7,7 +7,7 @@ import { useTokens } from './hooks/useTokens';
 
 function App() {
   const { wallet, connecting, error, connect, disconnect } = useWallet();
-  const { availableTokens } = useTokens(
+  const { availableTokens, syncing } = useTokens(
     wallet.connected,
     wallet.address,
     wallet.chainId
@@ -72,6 +72,18 @@ function App() {
             <div className="w-2 h-2 bg-[#10b981] rounded-full animate-pulse" />
             <span className="text-sm text-[#A3A3A3]">Liteforge Network • Live</span>
           </div>
+          {wallet.connected && syncing && (
+            <div className="inline-flex items-center gap-2 px-4 py-2 bg-[#262626] rounded-full border border-[#2F2F2F] mb-6 ml-2">
+              <Loader2 className="w-3 h-3 text-[#9E7FFF] animate-spin" />
+              <span className="text-sm text-[#A3A3A3]">Syncing tokens…</span>
+            </div>
+          )}
+          {wallet.connected && !syncing && availableTokens.length > 1 && (
+            <div className="inline-flex items-center gap-2 px-4 py-2 bg-[#262626] rounded-full border border-[#2F2F2F] mb-6 ml-2">
+              <CheckCircle className="w-3 h-3 text-[#10b981]" />
+              <span className="text-sm text-[#A3A3A3]">{availableTokens.length} tokens synced</span>
+            </div>
+          )}
           <h2 className="text-5xl md:text-6xl font-bold mb-4 bg-gradient-to-r from-[#FFFFFF] via-[#9E7FFF] to-[#38bdf8] bg-clip-text text-transparent">
             Trade Tokens Instantly
           </h2>

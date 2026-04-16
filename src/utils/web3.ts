@@ -49,6 +49,8 @@ const SWAP_CONTRACT_ABI = [
   'function getSwapQuote(address tokenIn, address tokenOut, uint256 amountIn) view returns (uint256 amountOut, uint256 fee)',
   'function getReserves(address tokenA, address tokenB) view returns (uint256 reserveA, uint256 reserveB)',
   'function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut) returns (uint256 amountOut)',
+  'function getSupportedTokens() view returns (address[])',
+  'function supportedTokens(address) view returns (bool)',
 ] as const;
 
 const ERC20_ABI = [
@@ -184,13 +186,80 @@ export const getTokenMetadata = async (tokenAddress: string, logoUrl?: string): 
   }
 };
 
-export const getWalletTrackedTokens = async (): Promise<Token[]> => {
+/**
+ * Discover tokens registered on the LiteforgeSwap contract.
+ * This is the primary discovery path — it reads the on-chain token list,
+ * fetches ERC-20 metadata for each address, and returns them as Token[].
+ */
+export const discoverContractTokens = async (): Promise<Token[]> => {
   if (!window.ethereum) {
     return [];
   }
 
   const chainId = await getWalletNetwork();
   if (chainId !== LITEFORGE_CHAIN_ID) {
+    return [];
+  }
+
+  let contractAddress: string;
+  try {
+    contractAddress = getSwapContractAddress();
+  } catch {
+    return [];
+  }
+
+  const ethereum = requireEthereumProvider();
+  const provider = new ethers.BrowserProvider(ethereum);
+  const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, provider);
+
+  let tokenAddresses: string[];
+  try {
+    tokenAddresses = (await swapContract.getSupportedTokens()) as string[];
+  } catch {
+    return [];
+  }
+
+  const discoveredTokens: Token[] = [];
+  const seen = new Set<string>();
+
+  for (const rawAddress of tokenAddresses) {
+    let checksummed: string;
+    try {
+      checksummed = ethers.getAddress(rawAddress);
+    } catch {
+      continue;
+    }
+
+    // Skip the native zkLTC placeholder — it is already a built-in token
+    if (checksummed === ethers.getAddress(NATIVE_ZKLTC_PLACEHOLDER_ADDRESS)) {
+      continue;
+    }
+
+    const key = checksummed.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+
+    try {
+      const token = await getTokenMetadata(checksummed);
+      discoveredTokens.push(token);
+    } catch {
+      // Token address didn't return valid ERC-20 metadata — skip it
+      continue;
+    }
+  }
+
+  return discoveredTokens;
+};
+
+/**
+ * Secondary discovery — reads wallet-tracked assets via the non-standard
+ * `wallet_getAssets` RPC. Not all wallets support this, so failures are
+ * silently ignored.
+ */
+const discoverWalletAssets = async (): Promise<Token[]> => {
+  if (!window.ethereum) {
     return [];
   }
 
@@ -275,6 +344,32 @@ export const getWalletTrackedTokens = async (): Promise<Token[]> => {
   }
 
   return discoveredTokens;
+};
+
+/**
+ * Unified token discovery — merges contract-registered tokens (primary)
+ * with wallet-tracked assets (secondary). Deduplicates by address.
+ */
+export const getWalletTrackedTokens = async (): Promise<Token[]> => {
+  // Run both discovery strategies in parallel
+  const [contractTokens, walletAssets] = await Promise.all([
+    discoverContractTokens().catch(() => [] as Token[]),
+    discoverWalletAssets().catch(() => [] as Token[]),
+  ]);
+
+  // Merge — contract tokens take priority
+  const merged: Token[] = [...contractTokens];
+  const seen = new Set(contractTokens.map((t) => t.address.toLowerCase()));
+
+  for (const token of walletAssets) {
+    const key = token.address.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(token);
+    }
+  }
+
+  return merged;
 };
 
 export const getCurrentWalletState = async (): Promise<WalletState> => {
