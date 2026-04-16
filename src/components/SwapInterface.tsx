@@ -1,14 +1,15 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ArrowDownUp, Loader2, AlertCircle, CheckCircle2, TrendingUp, Zap } from 'lucide-react';
 import { TokenSelector } from './TokenSelector';
 import { useSwap } from '../hooks/useSwap';
-import { getExplorerTxUrl } from '../utils/web3';
+import { formatTokenAmount, getExplorerTxUrl, getTokenBalance } from '../utils/web3';
 
 interface SwapInterfaceProps {
   connected: boolean;
+  walletAddress: string | null;
 }
 
-export const SwapInterface: React.FC<SwapInterfaceProps> = ({ connected }) => {
+export const SwapInterface: React.FC<SwapInterfaceProps> = ({ connected, walletAddress }) => {
   const {
     tokenIn,
     tokenOut,
@@ -27,6 +28,53 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({ connected }) => {
 
   const [txHash, setTxHash] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [tokenInBalance, setTokenInBalance] = useState<string | null>(null);
+  const [tokenOutBalance, setTokenOutBalance] = useState<string | null>(null);
+  const [balancesLoading, setBalancesLoading] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    const fetchBalances = async () => {
+      if (!connected || !walletAddress) {
+        if (active) {
+          setTokenInBalance(null);
+          setTokenOutBalance(null);
+          setBalancesLoading(false);
+        }
+        return;
+      }
+
+      try {
+        setBalancesLoading(true);
+
+        const [nextTokenInBalance, nextTokenOutBalance] = await Promise.all([
+          tokenIn ? getTokenBalance(tokenIn.address, walletAddress, tokenIn.decimals) : Promise.resolve(null),
+          tokenOut ? getTokenBalance(tokenOut.address, walletAddress, tokenOut.decimals) : Promise.resolve(null),
+        ]);
+
+        if (active) {
+          setTokenInBalance(nextTokenInBalance);
+          setTokenOutBalance(nextTokenOutBalance);
+        }
+      } catch {
+        if (active) {
+          setTokenInBalance(null);
+          setTokenOutBalance(null);
+        }
+      } finally {
+        if (active) {
+          setBalancesLoading(false);
+        }
+      }
+    };
+
+    void fetchBalances();
+
+    return () => {
+      active = false;
+    };
+  }, [connected, walletAddress, tokenIn, tokenOut, showSuccess]);
 
   const handleSwap = async () => {
     try {
@@ -65,7 +113,7 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({ connected }) => {
             <label className="text-sm text-[#A3A3A3]">From</label>
             {tokenIn && (
               <div className="text-sm text-[#A3A3A3]">
-                Balance: {(Math.random() * 1000).toFixed(2)}
+                Balance: {balancesLoading ? '...' : tokenInBalance ? formatTokenAmount(tokenInBalance, 4) : '0'}
               </div>
             )}
           </div>
@@ -103,7 +151,7 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({ connected }) => {
             <label className="text-sm text-[#A3A3A3]">To</label>
             {tokenOut && (
               <div className="text-sm text-[#A3A3A3]">
-                Balance: {(Math.random() * 1000).toFixed(2)}
+                Balance: {balancesLoading ? '...' : tokenOutBalance ? formatTokenAmount(tokenOutBalance, 4) : '0'}
               </div>
             )}
           </div>

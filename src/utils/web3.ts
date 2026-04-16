@@ -42,6 +42,7 @@ const SWAP_CONTRACT_ABI = [
 ] as const;
 
 const ERC20_ABI = [
+  'function balanceOf(address account) view returns (uint256)',
   'function allowance(address owner, address spender) view returns (uint256)',
   'function approve(address spender, uint256 amount) returns (bool)',
 ] as const;
@@ -222,13 +223,17 @@ export const subscribeWalletEvents = (
   };
 };
 
-// Placeholder until token contracts are wired for live reads.
-export const getTokenBalance = async (_tokenAddress: string, _walletAddress: string): Promise<string> => {
-  await new Promise(resolve => setTimeout(resolve, 300));
-  
-  // Generate random balance between 0 and 10000
-  const balance = (Math.random() * 10000).toFixed(6);
-  return balance;
+export const getTokenBalance = async (
+  tokenAddress: string,
+  walletAddress: string,
+  tokenDecimals: number = 18
+): Promise<string> => {
+  const ethereum = requireEthereumProvider();
+  const provider = new ethers.BrowserProvider(ethereum);
+  const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
+
+  const balanceWei = await tokenContract.balanceOf(walletAddress) as bigint;
+  return ethers.formatUnits(balanceWei, tokenDecimals);
 };
 
 export const getSwapQuote = async (

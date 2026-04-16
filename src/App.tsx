@@ -107,7 +107,7 @@ function App() {
 
         {/* Swap Interface */}
         <div id="swap" className="flex justify-center mb-12">
-          <SwapInterface connected={wallet.connected} />
+          <SwapInterface connected={wallet.connected} walletAddress={wallet.address} />
         </div>
 
         {error && (
