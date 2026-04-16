@@ -32,6 +32,7 @@ const DEFAULT_SLIPPAGE_BPS = 50; // 0.5%
 const SWAP_CONTRACT_ABI = [
   'function getSwapQuote(address tokenIn, address tokenOut, uint256 amountIn) view returns (uint256 amountOut, uint256 fee)',
   'function getReserves(address tokenA, address tokenB) view returns (uint256 reserveA, uint256 reserveB)',
+  'function swap(address tokenIn, address tokenOut, uint256 amountIn) returns (uint256 amountOut)',
 ] as const;
 
 const requireEthereumProvider = (): EthereumProvider => {
@@ -251,22 +252,58 @@ export const getSwapQuote = async (
   };
 };
 
-// Placeholder for phase 3 write-path integration.
 export const executeSwap = async (
-  _tokenIn: Token,
-  _tokenOut: Token,
-  _amountIn: string,
-  _amountOut: string
+  tokenIn: Token,
+  tokenOut: Token,
+  amountIn: string,
+  minimumExpectedAmountOut: string
 ): Promise<{ txHash: string; success: boolean }> => {
-  // Simulate transaction delay
-  await new Promise(resolve => setTimeout(resolve, 2000));
-  
-  // 95% success rate
-  const success = Math.random() > 0.05;
-  
+  const amountInNum = Number.parseFloat(amountIn);
+  if (!Number.isFinite(amountInNum) || amountInNum <= 0) {
+    throw new Error('Invalid swap input amount');
+  }
+
+  const expectedOutNum = Number.parseFloat(minimumExpectedAmountOut);
+  if (!Number.isFinite(expectedOutNum) || expectedOutNum <= 0) {
+    throw new Error('Invalid expected output amount');
+  }
+
+  const chainId = await getWalletNetwork();
+  if (chainId !== LITEFORGE_CHAIN_ID) {
+    throw new Error(`Wrong network. Switch wallet network to chain ID ${LITEFORGE_CHAIN_ID}.`);
+  }
+
+  const address = await getWalletAddress();
+  if (!address) {
+    throw new Error('Wallet is not connected');
+  }
+
+  const ethereum = requireEthereumProvider();
+  const provider = new ethers.BrowserProvider(ethereum);
+  const signer = await provider.getSigner();
+  const contractAddress = getSwapContractAddress();
+  const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, signer);
+
+  const amountInWei = ethers.parseUnits(amountIn, tokenIn.decimals);
+  const minimumExpectedOutWei = ethers.parseUnits(minimumExpectedAmountOut, tokenOut.decimals);
+  const currentQuote = await swapContract.getSwapQuote(tokenIn.address, tokenOut.address, amountInWei) as [bigint, bigint];
+  const currentOutWei = currentQuote[0];
+
+  // The contract does not support minOut in swap(); perform client-side protection pre-broadcast.
+  if (currentOutWei < minimumExpectedOutWei) {
+    throw new Error('Quote moved below minimum expected output. Refresh quote and try again.');
+  }
+
+  const tx = await swapContract.swap(tokenIn.address, tokenOut.address, amountInWei);
+  const receipt = await tx.wait();
+
+  if (!receipt || receipt.status !== 1) {
+    throw new Error('Swap transaction failed on-chain');
+  }
+
   return {
-    txHash: '0x' + Math.random().toString(16).substring(2, 66),
-    success,
+    txHash: tx.hash,
+    success: true,
   };
 };
 

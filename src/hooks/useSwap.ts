@@ -43,7 +43,7 @@ export const useSwap = () => {
     try {
       setSwapping(true);
       setError(null);
-      const result = await executeSwap(tokenIn, tokenOut, amountIn, quote.amountOut);
+      const result = await executeSwap(tokenIn, tokenOut, amountIn, quote.minimumReceived);
       
       if (!result.success) {
         throw new Error('Transaction failed');
