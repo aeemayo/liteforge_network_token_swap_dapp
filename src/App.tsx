@@ -4,9 +4,11 @@ import { WalletConnect } from './components/WalletConnect';
 import { SwapInterface } from './components/SwapInterface';
 import { LiquidityPool } from './components/LiquidityPool';
 import { useWallet } from './hooks/useWallet';
+import { useTokens } from './hooks/useTokens';
 
 function App() {
   const { wallet, connecting, error, connect, disconnect } = useWallet();
+  const { availableTokens, addCustomToken, addingToken } = useTokens();
 
   return (
     <div className="min-h-screen bg-[#171717] text-[#FFFFFF] relative overflow-hidden">
@@ -71,7 +73,7 @@ function App() {
             Trade Tokens Instantly
           </h2>
           <p className="text-xl text-[#A3A3A3] max-w-2xl mx-auto">
-            Swap ZKLTC and other tokens on the Liteforge network with lightning-fast speeds and minimal fees
+            Start with zkLTC, then add any deployed Liteforge ERC-20 token by address to swap with minimal fees
           </p>
         </div>
 
@@ -107,7 +109,13 @@ function App() {
 
         {/* Swap Interface */}
         <div id="swap" className="flex justify-center mb-12">
-          <SwapInterface connected={wallet.connected} walletAddress={wallet.address} />
+          <SwapInterface
+            connected={wallet.connected}
+            walletAddress={wallet.address}
+            tokens={availableTokens}
+            onAddToken={addCustomToken}
+            addingToken={addingToken}
+          />
         </div>
 
         {error && (

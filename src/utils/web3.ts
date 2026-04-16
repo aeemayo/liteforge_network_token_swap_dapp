@@ -32,7 +32,7 @@ declare global {
   }
 }
 
-const LITEFORGE_CHAIN_ID = Number(import.meta.env.VITE_LITEFORGE_CHAIN_ID ?? 1337);
+const LITEFORGE_CHAIN_ID = Number(import.meta.env.VITE_LITEFORGE_CHAIN_ID ?? 4441);
 const DEFAULT_SLIPPAGE_BPS = 50; // 0.5%
 
 const SWAP_CONTRACT_ABI = [
@@ -45,7 +45,12 @@ const ERC20_ABI = [
   'function balanceOf(address account) view returns (uint256)',
   'function allowance(address owner, address spender) view returns (uint256)',
   'function approve(address spender, uint256 amount) returns (bool)',
+  'function name() view returns (string)',
+  'function symbol() view returns (string)',
+  'function decimals() view returns (uint8)',
 ] as const;
+
+const FALLBACK_TOKEN_LOGO_URL = 'https://images.unsplash.com/photo-1621416894569-0f39ed31d247?w=100&h=100&fit=crop';
 
 const requireEthereumProvider = (): EthereumProvider => {
   if (!window.ethereum) {
@@ -124,6 +129,48 @@ export const getExplorerTxUrl = (txHash: string): string | null => {
 
   const normalizedBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
   return `${normalizedBase}${txHash}`;
+};
+
+export const getTokenMetadata = async (tokenAddress: string, logoUrl?: string): Promise<Token> => {
+  const checksummedAddress = ethers.getAddress(tokenAddress);
+  if (checksummedAddress === ethers.ZeroAddress) {
+    throw new Error('Token address cannot be zero address');
+  }
+
+  const chainId = await getWalletNetwork();
+  if (chainId !== LITEFORGE_CHAIN_ID) {
+    throw new Error(`Wrong network. Switch wallet network to chain ID ${LITEFORGE_CHAIN_ID}.`);
+  }
+
+  const ethereum = requireEthereumProvider();
+  const provider = new ethers.BrowserProvider(ethereum);
+  const tokenContract = new ethers.Contract(checksummedAddress, ERC20_ABI, provider);
+
+  try {
+    const [name, symbol, decimals] = await Promise.all([
+      tokenContract.name() as Promise<string>,
+      tokenContract.symbol() as Promise<string>,
+      tokenContract.decimals() as Promise<number>,
+    ]);
+
+    if (!name || !symbol) {
+      throw new Error('Invalid ERC-20 metadata');
+    }
+
+    if (!Number.isInteger(decimals) || decimals < 0 || decimals > 255) {
+      throw new Error('Invalid token decimals');
+    }
+
+    return {
+      address: checksummedAddress,
+      name,
+      symbol,
+      decimals,
+      logoUrl: logoUrl && logoUrl.length > 0 ? logoUrl : FALLBACK_TOKEN_LOGO_URL,
+    };
+  } catch {
+    throw new Error('Unable to read ERC-20 metadata from this address');
+  }
 };
 
 export const getCurrentWalletState = async (): Promise<WalletState> => {

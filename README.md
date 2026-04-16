@@ -24,8 +24,11 @@ This version is a functional dApp prototype with live wallet and contract wiring
 - Wallet connection is real (EIP-1193 compatible wallets)
 - Quote reads are on-chain via LiteforgeSwap.getSwapQuote
 - Swap execution is on-chain with allowance checks and approval flow
+- Token availability is zkLTC-first with user-added Liteforge ERC-20 tokens by address
 
-Note: Liquidity dashboard cards and token balances are still placeholder UI values.
+Live ERC-20 wallet balances are shown for selected tokens.
+
+Note: Liquidity dashboard cards are still placeholder UI values.
 
 ## Why this project matters
 
@@ -48,8 +51,8 @@ Configure these values in .env:
 
 ```bash
 VITE_SWAP_CONTRACT_ADDRESS=0xYourDeployedSwapContract
-VITE_LITEFORGE_CHAIN_ID=1337
-VITE_EXPLORER_TX_URL=https://explorer.example/tx/{txHash}
+VITE_LITEFORGE_CHAIN_ID=4441
+VITE_EXPLORER_TX_URL=https://liteforge.explorer.caldera.xyz/tx/{txHash}
 ```
 
 If VITE_EXPLORER_TX_URL does not contain {txHash}, the app appends the hash to the end of the URL.
@@ -65,7 +68,6 @@ npm run lint
 
 ## Next product milestones
 
-- Wire live ERC-20 balances into the swap form
 - Replace static liquidity pool cards with on-chain pool analytics
 - Add transaction history and richer slippage configuration
 - Add integration tests for critical swap flows

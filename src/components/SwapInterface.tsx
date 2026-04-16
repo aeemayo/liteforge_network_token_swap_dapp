@@ -3,13 +3,23 @@ import { ArrowDownUp, Loader2, AlertCircle, CheckCircle2, TrendingUp, Zap } from
 import { TokenSelector } from './TokenSelector';
 import { useSwap } from '../hooks/useSwap';
 import { formatTokenAmount, getExplorerTxUrl, getTokenBalance } from '../utils/web3';
+import { Token } from '../utils/tokens';
 
 interface SwapInterfaceProps {
   connected: boolean;
   walletAddress: string | null;
+  tokens: Token[];
+  onAddToken: (tokenAddress: string, logoUrl?: string) => Promise<void>;
+  addingToken: boolean;
 }
 
-export const SwapInterface: React.FC<SwapInterfaceProps> = ({ connected, walletAddress }) => {
+export const SwapInterface: React.FC<SwapInterfaceProps> = ({
+  connected,
+  walletAddress,
+  tokens,
+  onAddToken,
+  addingToken,
+}) => {
   const {
     tokenIn,
     tokenOut,
@@ -76,6 +86,12 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({ connected, walletA
     };
   }, [connected, walletAddress, tokenIn, tokenOut, showSuccess]);
 
+  useEffect(() => {
+    if (!tokenIn && tokens.length > 0) {
+      setTokenIn(tokens[0]);
+    }
+  }, [tokenIn, tokens, setTokenIn]);
+
   const handleSwap = async () => {
     try {
       const result = await swap();
@@ -129,6 +145,9 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({ connected, walletA
             <TokenSelector
               selectedToken={tokenIn}
               onSelect={setTokenIn}
+              tokens={tokens}
+              onAddToken={onAddToken}
+              addingToken={addingToken}
               excludeToken={tokenOut}
             />
           </div>
@@ -166,6 +185,9 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({ connected, walletA
             <TokenSelector
               selectedToken={tokenOut}
               onSelect={setTokenOut}
+              tokens={tokens}
+              onAddToken={onAddToken}
+              addingToken={addingToken}
               excludeToken={tokenIn}
             />
           </div>
