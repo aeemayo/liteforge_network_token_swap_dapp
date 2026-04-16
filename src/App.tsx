@@ -7,7 +7,11 @@ import { useTokens } from './hooks/useTokens';
 
 function App() {
   const { wallet, connecting, error, connect, disconnect } = useWallet();
-  const { availableTokens, addCustomToken, addingToken } = useTokens();
+  const { availableTokens, addCustomToken, addingToken } = useTokens(
+    wallet.connected,
+    wallet.address,
+    wallet.chainId
+  );
 
   return (
     <div className="min-h-screen bg-[#171717] text-[#FFFFFF] relative overflow-hidden">

@@ -20,6 +20,16 @@ interface SwapExecutionOptions {
   onStatusChange?: (status: SwapExecutionStatus) => void;
 }
 
+interface WalletAsset {
+  type?: string;
+  address?: string;
+  symbol?: string;
+  name?: string;
+  decimals?: number | string;
+  image?: string;
+  chainId?: number | string;
+}
+
 type EthereumProvider = {
   request: (args: { method: string; params?: unknown[] | object }) => Promise<unknown>;
   on: (event: 'accountsChanged' | 'chainChanged', handler: (payload: unknown) => void) => void;
@@ -51,6 +61,7 @@ const ERC20_ABI = [
 ] as const;
 
 const FALLBACK_TOKEN_LOGO_URL = 'https://images.unsplash.com/photo-1621416894569-0f39ed31d247?w=100&h=100&fit=crop';
+const NATIVE_ZKLTC_PLACEHOLDER_ADDRESS = '0x0000000000000000000000000000000000000001';
 
 const requireEthereumProvider = (): EthereumProvider => {
   if (!window.ethereum) {
@@ -173,6 +184,99 @@ export const getTokenMetadata = async (tokenAddress: string, logoUrl?: string): 
   }
 };
 
+export const getWalletTrackedTokens = async (): Promise<Token[]> => {
+  if (!window.ethereum) {
+    return [];
+  }
+
+  const chainId = await getWalletNetwork();
+  if (chainId !== LITEFORGE_CHAIN_ID) {
+    return [];
+  }
+
+  const ethereum = requireEthereumProvider();
+
+  let rawAssets: unknown;
+  try {
+    rawAssets = await ethereum.request({ method: 'wallet_getAssets' });
+  } catch {
+    return [];
+  }
+
+  const assets = Array.isArray(rawAssets)
+    ? rawAssets
+    : (typeof rawAssets === 'object' && rawAssets !== null && Array.isArray((rawAssets as { assets?: unknown[] }).assets)
+      ? (rawAssets as { assets: unknown[] }).assets
+      : []);
+
+  const discoveredTokens: Token[] = [];
+
+  for (const item of assets) {
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+
+    const asset = item as WalletAsset;
+    const assetType = typeof asset.type === 'string' ? asset.type.toLowerCase() : '';
+    if (assetType && assetType !== 'erc20') {
+      continue;
+    }
+
+    if (typeof asset.address !== 'string' || asset.address.trim().length === 0) {
+      continue;
+    }
+
+    let checksummedAddress: string;
+    try {
+      checksummedAddress = ethers.getAddress(asset.address);
+    } catch {
+      continue;
+    }
+
+    if (checksummedAddress === ethers.getAddress(NATIVE_ZKLTC_PLACEHOLDER_ADDRESS)) {
+      continue;
+    }
+
+    const duplicate = discoveredTokens.some((token) => token.address.toLowerCase() === checksummedAddress.toLowerCase());
+    if (duplicate) {
+      continue;
+    }
+
+    const parsedDecimals = typeof asset.decimals === 'number'
+      ? asset.decimals
+      : (typeof asset.decimals === 'string' ? Number.parseInt(asset.decimals, 10) : NaN);
+
+    if (
+      typeof asset.symbol === 'string' &&
+      asset.symbol.length > 0 &&
+      Number.isInteger(parsedDecimals) &&
+      parsedDecimals >= 0 &&
+      parsedDecimals <= 255
+    ) {
+      discoveredTokens.push({
+        address: checksummedAddress,
+        symbol: asset.symbol,
+        name: typeof asset.name === 'string' && asset.name.length > 0 ? asset.name : asset.symbol,
+        decimals: parsedDecimals,
+        logoUrl: typeof asset.image === 'string' && asset.image.length > 0 ? asset.image : FALLBACK_TOKEN_LOGO_URL,
+      });
+      continue;
+    }
+
+    try {
+      const metadataToken = await getTokenMetadata(
+        checksummedAddress,
+        typeof asset.image === 'string' ? asset.image : undefined
+      );
+      discoveredTokens.push(metadataToken);
+    } catch {
+      continue;
+    }
+  }
+
+  return discoveredTokens;
+};
+
 export const getCurrentWalletState = async (): Promise<WalletState> => {
   if (!window.ethereum) {
     return {
@@ -273,10 +377,20 @@ export const subscribeWalletEvents = (
 export const getTokenBalance = async (
   tokenAddress: string,
   walletAddress: string,
-  tokenDecimals: number = 18
+  tokenDecimals: number = 18,
+  isNative: boolean = false
 ): Promise<string> => {
   const ethereum = requireEthereumProvider();
   const provider = new ethers.BrowserProvider(ethereum);
+
+  const normalizedAddress = ethers.getAddress(tokenAddress);
+  const isNativeToken = isNative || normalizedAddress === ethers.getAddress(NATIVE_ZKLTC_PLACEHOLDER_ADDRESS);
+
+  if (isNativeToken) {
+    const nativeBalanceWei = await provider.getBalance(walletAddress);
+    return ethers.formatUnits(nativeBalanceWei, tokenDecimals);
+  }
+
   const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
 
   const balanceWei = await tokenContract.balanceOf(walletAddress) as bigint;

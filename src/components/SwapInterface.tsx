@@ -59,8 +59,8 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
         setBalancesLoading(true);
 
         const [nextTokenInBalance, nextTokenOutBalance] = await Promise.all([
-          tokenIn ? getTokenBalance(tokenIn.address, walletAddress, tokenIn.decimals) : Promise.resolve(null),
-          tokenOut ? getTokenBalance(tokenOut.address, walletAddress, tokenOut.decimals) : Promise.resolve(null),
+          tokenIn ? getTokenBalance(tokenIn.address, walletAddress, tokenIn.decimals, tokenIn.isNative) : Promise.resolve(null),
+          tokenOut ? getTokenBalance(tokenOut.address, walletAddress, tokenOut.decimals, tokenOut.isNative) : Promise.resolve(null),
         ]);
 
         if (active) {

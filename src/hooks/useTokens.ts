@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Token, LITEFORGE_TOKENS } from '../utils/tokens';
-import { getTokenMetadata } from '../utils/web3';
+import { getTokenMetadata, getWalletTrackedTokens } from '../utils/web3';
 
 const CUSTOM_TOKENS_STORAGE_KEY = 'liteforge_custom_tokens';
 
@@ -39,8 +39,9 @@ const parseStoredTokens = (): Token[] => {
   }
 };
 
-export const useTokens = () => {
+export const useTokens = (connected: boolean, walletAddress: string | null, chainId: number | null) => {
   const [customTokens, setCustomTokens] = useState<Token[]>([]);
+  const [walletTrackedTokens, setWalletTrackedTokens] = useState<Token[]>([]);
   const [addingToken, setAddingToken] = useState(false);
 
   useEffect(() => {
@@ -51,9 +52,50 @@ export const useTokens = () => {
     window.localStorage.setItem(CUSTOM_TOKENS_STORAGE_KEY, JSON.stringify(customTokens));
   }, [customTokens]);
 
+  useEffect(() => {
+    let active = true;
+
+    const discoverWalletTokens = async () => {
+      if (!connected || !walletAddress || !chainId) {
+        if (active) {
+          setWalletTrackedTokens([]);
+        }
+        return;
+      }
+
+      try {
+        const discovered = await getWalletTrackedTokens();
+        if (active) {
+          setWalletTrackedTokens(discovered);
+        }
+      } catch {
+        if (active) {
+          setWalletTrackedTokens([]);
+        }
+      }
+    };
+
+    void discoverWalletTokens();
+
+    return () => {
+      active = false;
+    };
+  }, [connected, walletAddress, chainId]);
+
   const availableTokens = useMemo(() => {
-    return [...LITEFORGE_TOKENS, ...customTokens];
-  }, [customTokens]);
+    const merged = [...LITEFORGE_TOKENS, ...walletTrackedTokens, ...customTokens];
+    const seen = new Set<string>();
+
+    return merged.filter((token) => {
+      const key = token.address.toLowerCase();
+      if (seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    });
+  }, [customTokens, walletTrackedTokens]);
 
   const addCustomToken = async (address: string, logoUrl?: string) => {
     const normalizedAddress = address.trim().toLowerCase();
@@ -82,6 +124,7 @@ export const useTokens = () => {
   return {
     availableTokens,
     customTokens,
+    walletTrackedTokens,
     addCustomToken,
     addingToken,
   };

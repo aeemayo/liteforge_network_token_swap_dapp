@@ -5,15 +5,17 @@ export interface Token {
   decimals: number;
   logoUrl: string;
   balance?: string;
+  isNative?: boolean;
 }
 
 export const LITEFORGE_TOKENS: Token[] = [
   {
     address: '0x0000000000000000000000000000000000000001',
-    symbol: 'ZKLTC',
+    symbol: 'zkLTC',
     name: 'zkLitecoin',
     decimals: 18,
     logoUrl: 'https://images.unsplash.com/photo-1621416894569-0f39ed31d247?w=100&h=100&fit=crop',
+    isNative: true,
   },
 ];
 
