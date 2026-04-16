@@ -2,12 +2,14 @@ import { Zap, Github, Twitter, MessageCircle, TrendingUp, Shield, Droplets, Load
 import { WalletConnect } from './components/WalletConnect';
 import { SwapInterface } from './components/SwapInterface';
 import { LiquidityPool } from './components/LiquidityPool';
+import { AddLiquidity } from './components/AddLiquidity';
+import { TokenAdmin } from './components/TokenAdmin';
 import { useWallet } from './hooks/useWallet';
 import { useTokens } from './hooks/useTokens';
 
 function App() {
   const { wallet, connecting, error, connect, disconnect } = useWallet();
-  const { availableTokens, syncing } = useTokens(
+  const { availableTokens, syncing, addCustomToken } = useTokens(
     wallet.connected,
     wallet.address,
     wallet.chainId
@@ -122,12 +124,21 @@ function App() {
           </div>
         </div>
 
+        {/* Token Admin (only visible to contract owner) */}
+        <div className="flex justify-center mb-4">
+          <TokenAdmin
+            connected={wallet.connected}
+            walletAddress={wallet.address}
+          />
+        </div>
+
         {/* Swap Interface */}
         <div id="swap" className="flex justify-center mb-12">
           <SwapInterface
             connected={wallet.connected}
             walletAddress={wallet.address}
             tokens={availableTokens}
+            onImportToken={addCustomToken}
           />
         </div>
 
@@ -138,8 +149,14 @@ function App() {
         )}
 
         {/* Liquidity Pools */}
-        <div id="pools" className="flex justify-center">
-          <LiquidityPool />
+        <div id="pools" className="flex flex-col items-center">
+          <LiquidityPool tokens={availableTokens} connected={wallet.connected} />
+          <AddLiquidity
+            tokens={availableTokens}
+            connected={wallet.connected}
+            walletAddress={wallet.address}
+            onImportToken={addCustomToken}
+          />
         </div>
       </main>
 

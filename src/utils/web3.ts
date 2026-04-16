@@ -48,9 +48,12 @@ const DEFAULT_SLIPPAGE_BPS = 50; // 0.5%
 const SWAP_CONTRACT_ABI = [
   'function getSwapQuote(address tokenIn, address tokenOut, uint256 amountIn) view returns (uint256 amountOut, uint256 fee)',
   'function getReserves(address tokenA, address tokenB) view returns (uint256 reserveA, uint256 reserveB)',
-  'function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut) returns (uint256 amountOut)',
+  'function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut) payable returns (uint256 amountOut)',
+  'function addLiquidity(address tokenA, address tokenB, uint256 amountA, uint256 amountB) payable returns (uint256 liquidity)',
   'function getSupportedTokens() view returns (address[])',
   'function supportedTokens(address) view returns (bool)',
+  'function addSupportedToken(address token, string symbol)',
+  'function owner() view returns (address)',
 ] as const;
 
 const ERC20_ABI = [
@@ -160,18 +163,21 @@ export const getTokenMetadata = async (tokenAddress: string, logoUrl?: string): 
   const tokenContract = new ethers.Contract(checksummedAddress, ERC20_ABI, provider);
 
   try {
-    const [name, symbol, decimals] = await Promise.all([
+    const [name, symbol, rawDecimals] = await Promise.all([
       tokenContract.name() as Promise<string>,
       tokenContract.symbol() as Promise<string>,
-      tokenContract.decimals() as Promise<number>,
+      tokenContract.decimals() as Promise<bigint>,
     ]);
 
+    // ethers v6 returns bigint for uint8 — convert to number
+    const decimals = Number(rawDecimals);
+
     if (!name || !symbol) {
-      throw new Error('Invalid ERC-20 metadata');
+      throw new Error('Invalid ERC-20 metadata: missing name or symbol');
     }
 
     if (!Number.isInteger(decimals) || decimals < 0 || decimals > 255) {
-      throw new Error('Invalid token decimals');
+      throw new Error('Invalid token decimals: ' + String(rawDecimals));
     }
 
     return {
@@ -181,8 +187,14 @@ export const getTokenMetadata = async (tokenAddress: string, logoUrl?: string): 
       decimals,
       logoUrl: logoUrl && logoUrl.length > 0 ? logoUrl : FALLBACK_TOKEN_LOGO_URL,
     };
-  } catch {
-    throw new Error('Unable to read ERC-20 metadata from this address');
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('Invalid')) {
+      throw err;
+    }
+    throw new Error(
+      'Unable to read ERC-20 metadata from this address' +
+      (err instanceof Error ? ': ' + err.message : '')
+    );
   }
 };
 
@@ -505,16 +517,62 @@ export const getSwapQuote = async (
   const ethereum = requireEthereumProvider();
   const provider = new ethers.BrowserProvider(ethereum);
   const contractAddress = getSwapContractAddress();
-  const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, provider);
 
-  const amountInWei = ethers.parseUnits(amountIn, tokenIn.decimals);
-  const [amountOutWei, feeWei] = await swapContract.getSwapQuote(tokenIn.address, tokenOut.address, amountInWei) as [bigint, bigint];
-
-  if (amountOutWei <= 0n) {
-    throw new Error('No quote available for this pair. Pool may have insufficient liquidity.');
+  // Verify contract exists at the configured address
+  const code = await provider.getCode(contractAddress);
+  if (code === '0x') {
+    throw new Error(
+      'No contract found at the configured address. ' +
+      'Please deploy the updated LiteforgeSwap contract and update VITE_SWAP_CONTRACT_ADDRESS in .env.'
+    );
   }
 
-  const [reserveInWei, reserveOutWei] = await swapContract.getReserves(tokenIn.address, tokenOut.address) as [bigint, bigint];
+  const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, provider);
+
+  let amountOutWei: bigint;
+  let feeWei: bigint;
+
+  try {
+    const amountInWei = ethers.parseUnits(amountIn, tokenIn.decimals);
+    [amountOutWei, feeWei] = await swapContract.getSwapQuote(tokenIn.address, tokenOut.address, amountInWei) as [bigint, bigint];
+  } catch (err: unknown) {
+    const errorObj = err as { code?: string; reason?: string; message?: string };
+
+    if (errorObj.code === 'BAD_DATA') {
+      throw new Error(
+        'Contract ABI mismatch — the deployed contract may be outdated. ' +
+        'Redeploy the updated LiteforgeSwap.sol and update VITE_SWAP_CONTRACT_ADDRESS in .env.'
+      );
+    }
+
+    if (errorObj.code === 'CALL_EXCEPTION') {
+      const reason = errorObj.reason || errorObj.message || '';
+      if (reason.includes('Token not supported')) {
+        throw new Error(
+          'One or both tokens are not registered on the swap contract. ' +
+          'Use the Contract Admin panel to register them.'
+        );
+      }
+      throw new Error(reason || 'Contract call failed');
+    }
+
+    throw err;
+  }
+
+  if (amountOutWei <= 0n) {
+    throw new Error(
+      'No liquidity available for this pair. Add liquidity to the ' +
+      `${tokenIn.symbol}/${tokenOut.symbol} pool before swapping.`
+    );
+  }
+
+  let reserveInWei = 0n;
+  let reserveOutWei = 0n;
+  try {
+    [reserveInWei, reserveOutWei] = await swapContract.getReserves(tokenIn.address, tokenOut.address) as [bigint, bigint];
+  } catch {
+    // Non-critical — price impact will just show 0
+  }
 
   const amountOut = toDisplayAmount(amountOutWei, tokenOut.decimals);
   const fee = toDisplayAmount(feeWei, tokenIn.decimals);
@@ -579,17 +637,22 @@ export const executeSwap = async (
 
   const amountInWei = ethers.parseUnits(amountIn, tokenIn.decimals);
   const minimumExpectedOutWei = ethers.parseUnits(minimumExpectedAmountOut, tokenOut.decimals);
-  options?.onStatusChange?.('checking-allowance');
 
-  const tokenInContract = new ethers.Contract(tokenIn.address, ERC20_ABI, signer);
-  const currentAllowance = await tokenInContract.allowance(signerAddress, contractAddress) as bigint;
+  const isNativeIn = tokenIn.isNative || tokenIn.address.toLowerCase() === NATIVE_ZKLTC_PLACEHOLDER_ADDRESS.toLowerCase();
 
-  if (currentAllowance < amountInWei) {
-    options?.onStatusChange?.('approving');
-    const approveTx = await tokenInContract.approve(contractAddress, ethers.MaxUint256);
-    const approveReceipt = await approveTx.wait();
-    if (!approveReceipt || approveReceipt.status !== 1) {
-      throw new Error('Approval transaction failed');
+  // ERC-20 tokens need allowance check + approval; native tokens skip this
+  if (!isNativeIn) {
+    options?.onStatusChange?.('checking-allowance');
+    const tokenInContract = new ethers.Contract(tokenIn.address, ERC20_ABI, signer);
+    const currentAllowance = await tokenInContract.allowance(signerAddress, contractAddress) as bigint;
+
+    if (currentAllowance < amountInWei) {
+      options?.onStatusChange?.('approving');
+      const approveTx = await tokenInContract.approve(contractAddress, ethers.MaxUint256);
+      const approveReceipt = await approveTx.wait();
+      if (!approveReceipt || approveReceipt.status !== 1) {
+        throw new Error('Approval transaction failed');
+      }
     }
   }
 
@@ -602,7 +665,16 @@ export const executeSwap = async (
   }
 
   options?.onStatusChange?.('swapping');
-  const tx = await swapContract.swap(tokenIn.address, tokenOut.address, amountInWei, minimumExpectedOutWei);
+
+  // Send msg.value for native token swaps, 0 for ERC-20
+  const txOverrides = isNativeIn ? { value: amountInWei } : {};
+  const tx = await swapContract.swap(
+    tokenIn.address,
+    tokenOut.address,
+    amountInWei,
+    minimumExpectedOutWei,
+    txOverrides
+  );
   const receipt = await tx.wait();
 
   if (!receipt || receipt.status !== 1) {
@@ -633,4 +705,148 @@ export const formatTokenAmount = (amount: string, decimals: number = 6): string 
   }
   
   return num.toFixed(decimals);
+};
+
+// ── Admin / Owner functions ──
+
+export const isContractOwner = async (walletAddress: string): Promise<boolean> => {
+  if (!window.ethereum) return false;
+
+  try {
+    const ethereum = requireEthereumProvider();
+    const provider = new ethers.BrowserProvider(ethereum);
+    const contractAddress = getSwapContractAddress();
+    const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, provider);
+    const owner = (await swapContract.owner()) as string;
+    return owner.toLowerCase() === walletAddress.toLowerCase();
+  } catch {
+    return false;
+  }
+};
+
+export const isTokenSupported = async (tokenAddress: string): Promise<boolean> => {
+  if (!window.ethereum) return false;
+
+  try {
+    const ethereum = requireEthereumProvider();
+    const provider = new ethers.BrowserProvider(ethereum);
+    const contractAddress = getSwapContractAddress();
+    const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, provider);
+    return (await swapContract.supportedTokens(tokenAddress)) as boolean;
+  } catch {
+    return false;
+  }
+};
+
+export const registerSupportedToken = async (
+  tokenAddress: string,
+  symbol: string
+): Promise<{ txHash: string; success: boolean }> => {
+  const chainId = await getWalletNetwork();
+  if (chainId !== LITEFORGE_CHAIN_ID) {
+    throw new Error(`Wrong network. Switch to chain ID ${LITEFORGE_CHAIN_ID}.`);
+  }
+
+  const ethereum = requireEthereumProvider();
+  const provider = new ethers.BrowserProvider(ethereum);
+  const signer = await provider.getSigner();
+  const contractAddress = getSwapContractAddress();
+  const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, signer);
+
+  const tx = await swapContract.addSupportedToken(tokenAddress, symbol);
+  const receipt = await tx.wait();
+
+  if (!receipt || receipt.status !== 1) {
+    throw new Error('Token registration transaction failed');
+  }
+
+  return { txHash: tx.hash, success: true };
+};
+
+// ── Liquidity functions ──
+
+export type LiquidityStatus = 'approving-a' | 'approving-b' | 'adding';
+
+export const executeAddLiquidity = async (
+  tokenA: Token,
+  tokenB: Token,
+  amountA: string,
+  amountB: string,
+  onStatus?: (status: LiquidityStatus) => void
+): Promise<{ txHash: string; success: boolean }> => {
+  const amountANum = Number.parseFloat(amountA);
+  const amountBNum = Number.parseFloat(amountB);
+  if (!Number.isFinite(amountANum) || amountANum <= 0) {
+    throw new Error('Invalid amount for ' + tokenA.symbol);
+  }
+  if (!Number.isFinite(amountBNum) || amountBNum <= 0) {
+    throw new Error('Invalid amount for ' + tokenB.symbol);
+  }
+
+  const chainId = await getWalletNetwork();
+  if (chainId !== LITEFORGE_CHAIN_ID) {
+    throw new Error(`Wrong network. Switch to chain ID ${LITEFORGE_CHAIN_ID}.`);
+  }
+
+  const ethereum = requireEthereumProvider();
+  const provider = new ethers.BrowserProvider(ethereum);
+  const signer = await provider.getSigner();
+  const signerAddress = await signer.getAddress();
+  const contractAddress = getSwapContractAddress();
+  const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, signer);
+
+  const amountAWei = ethers.parseUnits(amountA, tokenA.decimals);
+  const amountBWei = ethers.parseUnits(amountB, tokenB.decimals);
+
+  const isNativeA = tokenA.isNative || tokenA.address.toLowerCase() === NATIVE_ZKLTC_PLACEHOLDER_ADDRESS.toLowerCase();
+  const isNativeB = tokenB.isNative || tokenB.address.toLowerCase() === NATIVE_ZKLTC_PLACEHOLDER_ADDRESS.toLowerCase();
+
+  // Approve ERC-20 tokens (skip for native)
+  if (!isNativeA) {
+    onStatus?.('approving-a');
+    const tokenAContract = new ethers.Contract(tokenA.address, ERC20_ABI, signer);
+    const allowanceA = await tokenAContract.allowance(signerAddress, contractAddress) as bigint;
+    if (allowanceA < amountAWei) {
+      const approveTx = await tokenAContract.approve(contractAddress, ethers.MaxUint256);
+      const receipt = await approveTx.wait();
+      if (!receipt || receipt.status !== 1) {
+        throw new Error(`${tokenA.symbol} approval failed`);
+      }
+    }
+  }
+
+  if (!isNativeB) {
+    onStatus?.('approving-b');
+    const tokenBContract = new ethers.Contract(tokenB.address, ERC20_ABI, signer);
+    const allowanceB = await tokenBContract.allowance(signerAddress, contractAddress) as bigint;
+    if (allowanceB < amountBWei) {
+      const approveTx = await tokenBContract.approve(contractAddress, ethers.MaxUint256);
+      const receipt = await approveTx.wait();
+      if (!receipt || receipt.status !== 1) {
+        throw new Error(`${tokenB.symbol} approval failed`);
+      }
+    }
+  }
+
+  onStatus?.('adding');
+
+  // Send msg.value if one token is native
+  let nativeValue = 0n;
+  if (isNativeA) nativeValue = amountAWei;
+  if (isNativeB) nativeValue = amountBWei;
+
+  const tx = await swapContract.addLiquidity(
+    tokenA.address,
+    tokenB.address,
+    amountAWei,
+    amountBWei,
+    { value: nativeValue }
+  );
+  const receipt = await tx.wait();
+
+  if (!receipt || receipt.status !== 1) {
+    throw new Error('Add liquidity transaction failed');
+  }
+
+  return { txHash: tx.hash, success: true };
 };

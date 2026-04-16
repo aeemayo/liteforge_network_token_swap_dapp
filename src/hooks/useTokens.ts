@@ -1,27 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Token, LITEFORGE_TOKENS } from '../utils/tokens';
+import {
+  Token,
+  LITEFORGE_TOKENS,
+  loadCustomTokens,
+  addCustomToken as persistCustomToken,
+} from '../utils/tokens';
 import { getWalletTrackedTokens } from '../utils/web3';
 
 export const useTokens = (connected: boolean, walletAddress: string | null, chainId: number | null) => {
   const [walletTrackedTokens, setWalletTrackedTokens] = useState<Token[]>([]);
+  const [customTokens, setCustomTokens] = useState<Token[]>(loadCustomTokens);
   const [syncing, setSyncing] = useState(false);
-
-  const discoverWalletTokens = useCallback(async () => {
-    if (!connected || !walletAddress || !chainId) {
-      setWalletTrackedTokens([]);
-      return;
-    }
-
-    try {
-      setSyncing(true);
-      const discovered = await getWalletTrackedTokens();
-      setWalletTrackedTokens(discovered);
-    } catch {
-      setWalletTrackedTokens([]);
-    } finally {
-      setSyncing(false);
-    }
-  }, [connected, walletAddress, chainId]);
 
   // Immediate sync on wallet connection / account / chain change
   useEffect(() => {
@@ -60,8 +49,13 @@ export const useTokens = (connected: boolean, walletAddress: string | null, chai
     };
   }, [connected, walletAddress, chainId]);
 
+  const addCustomToken = useCallback((token: Token) => {
+    const updated = persistCustomToken(token);
+    setCustomTokens(updated);
+  }, []);
+
   const availableTokens = useMemo(() => {
-    const merged = [...LITEFORGE_TOKENS, ...walletTrackedTokens];
+    const merged = [...LITEFORGE_TOKENS, ...customTokens, ...walletTrackedTokens];
     const seen = new Set<string>();
 
     return merged.filter((token) => {
@@ -73,12 +67,13 @@ export const useTokens = (connected: boolean, walletAddress: string | null, chai
       seen.add(key);
       return true;
     });
-  }, [walletTrackedTokens]);
+  }, [walletTrackedTokens, customTokens]);
 
   return {
     availableTokens,
     walletTrackedTokens,
+    customTokens,
     syncing,
-    refreshTokens: discoverWalletTokens,
+    addCustomToken,
   };
 };

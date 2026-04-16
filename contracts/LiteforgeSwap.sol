@@ -10,8 +10,12 @@ interface IERC20 {
  * @title LiteforgeSwap
  * @notice Decentralized exchange for swapping tokens on the Liteforge network
  * @dev Implements automated market maker (AMM) with constant product formula (x * y = k)
+ *      Supports native zkLTC swaps via a sentinel address.
  */
 contract LiteforgeSwap {
+    // Sentinel address representing the native token (zkLTC)
+    address public constant NATIVE_TOKEN = address(1);
+
     // State variables
     address public owner;
     uint256 public totalLiquidity;
@@ -74,13 +78,46 @@ contract LiteforgeSwap {
     bool private locked;
     
     /**
-     * @notice Contract constructor
+     * @notice Contract constructor — registers native token automatically
      */
     constructor() {
         owner = msg.sender;
         locked = false;
+
+        // Auto-register the native token so it is always available
+        supportedTokens[NATIVE_TOKEN] = true;
+        tokenList.push(NATIVE_TOKEN);
+        emit TokenAdded(NATIVE_TOKEN, "zkLTC");
     }
+
+    /// @notice Accept plain native-token transfers (e.g. for liquidity)
+    receive() external payable {}
     
+    // ── Internal helpers for native / ERC-20 transfers ──────────────
+
+    function _isNative(address token) internal pure returns (bool) {
+        return token == NATIVE_TOKEN;
+    }
+
+    function _pullTokens(address token, address from, uint256 amount) internal {
+        if (_isNative(token)) {
+            require(msg.value == amount, "Native amount mismatch");
+        } else {
+            require(IERC20(token).transferFrom(from, address(this), amount), "ERC-20 transferFrom failed");
+        }
+    }
+
+    function _pushTokens(address token, address to, uint256 amount) internal {
+        if (_isNative(token)) {
+            (bool sent, ) = payable(to).call{value: amount}("");
+            require(sent, "Native transfer failed");
+        } else {
+            require(IERC20(token).transfer(to, amount), "ERC-20 transfer failed");
+        }
+    }
+
+    // ── Token management ────────────────────────────────────────────
+
     /**
      * @notice Add a new supported token
      * @param token Address of the token to add
@@ -104,23 +141,30 @@ contract LiteforgeSwap {
         return tokenList;
     }
     
+    // ── Liquidity ───────────────────────────────────────────────────
+
     /**
      * @notice Add liquidity to a token pair
-     * @param tokenA Address of first token
-     * @param tokenB Address of second token
-     * @param amountA Amount of first token
-     * @param amountB Amount of second token
-     * @return liquidity Amount of liquidity tokens minted
+     * @dev If one of the tokens is native, send the native amount as msg.value.
      */
     function addLiquidity(
         address tokenA,
         address tokenB,
         uint256 amountA,
         uint256 amountB
-    ) external nonReentrant returns (uint256 liquidity) {
+    ) external payable nonReentrant returns (uint256 liquidity) {
         require(supportedTokens[tokenA] && supportedTokens[tokenB], "Token not supported");
         require(tokenA != tokenB, "Cannot add liquidity for same token");
         require(amountA > 0 && amountB > 0, "Amounts must be greater than 0");
+
+        // Exactly one token may be native; validate msg.value accordingly
+        if (_isNative(tokenA)) {
+            require(msg.value == amountA, "Native amount mismatch for tokenA");
+        } else if (_isNative(tokenB)) {
+            require(msg.value == amountB, "Native amount mismatch for tokenB");
+        } else {
+            require(msg.value == 0, "No native value expected");
+        }
         
         // Order tokens consistently
         if (tokenA > tokenB) {
@@ -132,10 +176,8 @@ contract LiteforgeSwap {
         uint256 reserveB = reserves[tokenB][tokenA];
         
         if (reserveA == 0 && reserveB == 0) {
-            // First liquidity provider
             liquidity = sqrt(amountA * amountB);
         } else {
-            // Subsequent liquidity providers must maintain ratio
             uint256 liquidityA = (amountA * totalLiquidity) / reserveA;
             uint256 liquidityB = (amountB * totalLiquidity) / reserveB;
             liquidity = liquidityA < liquidityB ? liquidityA : liquidityB;
@@ -143,8 +185,13 @@ contract LiteforgeSwap {
         
         require(liquidity > 0, "Insufficient liquidity minted");
 
-        require(IERC20(tokenA).transferFrom(msg.sender, address(this), amountA), "TokenA transfer failed");
-        require(IERC20(tokenB).transferFrom(msg.sender, address(this), amountB), "TokenB transfer failed");
+        // Pull tokens (native already received via msg.value)
+        if (!_isNative(tokenA)) {
+            require(IERC20(tokenA).transferFrom(msg.sender, address(this), amountA), "TokenA transfer failed");
+        }
+        if (!_isNative(tokenB)) {
+            require(IERC20(tokenB).transferFrom(msg.sender, address(this), amountB), "TokenB transfer failed");
+        }
         
         // Update reserves
         reserves[tokenA][tokenB] += amountA;
@@ -159,11 +206,6 @@ contract LiteforgeSwap {
     
     /**
      * @notice Remove liquidity from a token pair
-     * @param tokenA Address of first token
-     * @param tokenB Address of second token
-     * @param liquidity Amount of liquidity tokens to burn
-     * @return amountA Amount of first token returned
-     * @return amountB Amount of second token returned
      */
     function removeLiquidity(
         address tokenA,
@@ -173,7 +215,6 @@ contract LiteforgeSwap {
         require(liquidity > 0, "Liquidity must be greater than 0");
         require(liquidityBalance[msg.sender] >= liquidity, "Insufficient liquidity balance");
         
-        // Order tokens consistently
         if (tokenA > tokenB) {
             (tokenA, tokenB) = (tokenB, tokenA);
         }
@@ -183,63 +224,66 @@ contract LiteforgeSwap {
         
         require(reserveA > 0 && reserveB > 0, "No liquidity in pool");
         
-        // Calculate amounts to return
         amountA = (liquidity * reserveA) / totalLiquidity;
         amountB = (liquidity * reserveB) / totalLiquidity;
         
         require(amountA > 0 && amountB > 0, "Insufficient liquidity burned");
         
-        // Update reserves
         reserves[tokenA][tokenB] -= amountA;
         reserves[tokenB][tokenA] -= amountB;
 
-        require(IERC20(tokenA).transfer(msg.sender, amountA), "TokenA transfer failed");
-        require(IERC20(tokenB).transfer(msg.sender, amountB), "TokenB transfer failed");
+        _pushTokens(tokenA, msg.sender, amountA);
+        _pushTokens(tokenB, msg.sender, amountB);
         
-        // Update liquidity tracking
         liquidityBalance[msg.sender] -= liquidity;
         totalLiquidity -= liquidity;
         
         emit LiquidityRemoved(msg.sender, tokenA, tokenB, amountA, amountB, liquidity);
     }
     
+    // ── Swap ────────────────────────────────────────────────────────
+
     /**
      * @notice Swap tokens using constant product formula
-     * @param tokenIn Address of input token
-     * @param tokenOut Address of output token
-     * @param amountIn Amount of input token
-     * @param minAmountOut Minimum output amount accepted
-     * @return amountOut Amount of output token received
+     * @dev If tokenIn is native, send the exact amount as msg.value.
+     *      If tokenIn is ERC-20, msg.value must be 0.
      */
     function swap(
         address tokenIn,
         address tokenOut,
         uint256 amountIn,
         uint256 minAmountOut
-    ) external nonReentrant returns (uint256 amountOut) {
+    ) external payable nonReentrant returns (uint256 amountOut) {
         require(supportedTokens[tokenIn] && supportedTokens[tokenOut], "Token not supported");
         require(tokenIn != tokenOut, "Cannot swap same token");
         require(amountIn > 0, "Amount must be greater than 0");
+
+        if (_isNative(tokenIn)) {
+            require(msg.value == amountIn, "Native amount mismatch");
+        } else {
+            require(msg.value == 0, "No native value expected for ERC-20 swap");
+        }
         
         uint256 reserveIn = reserves[tokenIn][tokenOut];
         uint256 reserveOut = reserves[tokenOut][tokenIn];
         
         require(reserveIn > 0 && reserveOut > 0, "Insufficient liquidity");
         
-        // Calculate fee
         uint256 amountInWithFee = amountIn * (10000 - feePercentage);
         uint256 fee = amountIn * feePercentage / 10000;
         
-        // Calculate output amount using constant product formula: x * y = k
-        // amountOut = (amountIn * reserveOut) / (reserveIn + amountIn)
         amountOut = (amountInWithFee * reserveOut) / (reserveIn * 10000 + amountInWithFee);
         
         require(amountOut > 0, "Insufficient output amount");
         require(amountOut < reserveOut, "Insufficient liquidity for swap");
         require(amountOut >= minAmountOut, "Slippage exceeded");
 
-        require(IERC20(tokenIn).transferFrom(msg.sender, address(this), amountIn), "Input transfer failed");
-        require(IERC20(tokenOut).transfer(msg.sender, amountOut), "Output transfer failed");
+        // Pull input (native already received via msg.value)
+        if (!_isNative(tokenIn)) {
+            require(IERC20(tokenIn).transferFrom(msg.sender, address(this), amountIn), "Input transfer failed");
+        }
+        // Push output
+        _pushTokens(tokenOut, msg.sender, amountOut);
         
         // Update reserves
         reserves[tokenIn][tokenOut] += amountIn;
@@ -248,13 +292,10 @@ contract LiteforgeSwap {
         emit Swap(msg.sender, tokenIn, tokenOut, amountIn, amountOut, fee);
     }
     
+    // ── Quotes & views ──────────────────────────────────────────────
+
     /**
-     * @notice Get quote for swap
-     * @param tokenIn Address of input token
-     * @param tokenOut Address of output token
-     * @param amountIn Amount of input token
-     * @return amountOut Estimated amount of output token
-     * @return fee Fee amount
+     * @notice Get quote for swap (pure read — no msg.value needed)
      */
     function getSwapQuote(
         address tokenIn,
@@ -278,10 +319,6 @@ contract LiteforgeSwap {
     
     /**
      * @notice Get reserves for a token pair
-     * @param tokenA Address of first token
-     * @param tokenB Address of second token
-     * @return reserveA Reserve of first token
-     * @return reserveB Reserve of second token
      */
     function getReserves(address tokenA, address tokenB) 
         external 
@@ -292,6 +329,8 @@ contract LiteforgeSwap {
         reserveB = reserves[tokenB][tokenA];
     }
     
+    // ── Admin ───────────────────────────────────────────────────────
+
     /**
      * @notice Update fee percentage
      * @param newFee New fee in basis points (e.g., 30 = 0.3%)
@@ -305,8 +344,6 @@ contract LiteforgeSwap {
     
     /**
      * @notice Calculate square root (Babylonian method)
-     * @param x Input value
-     * @return y Square root of x
      */
     function sqrt(uint256 x) internal pure returns (uint256 y) {
         if (x == 0) return 0;
