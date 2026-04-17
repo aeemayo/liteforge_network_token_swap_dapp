@@ -45,7 +45,7 @@ declare global {
 const LITEFORGE_CHAIN_ID = Number(import.meta.env.VITE_LITEFORGE_CHAIN_ID ?? 4441);
 const DEFAULT_SLIPPAGE_BPS = 50; // 0.5%
 
-const SWAP_CONTRACT_ABI = [
+export const SWAP_CONTRACT_ABI = [
   'function getSwapQuote(address tokenIn, address tokenOut, uint256 amountIn) view returns (uint256 amountOut, uint256 fee)',
   'function getReserves(address tokenA, address tokenB) view returns (uint256 reserveA, uint256 reserveB)',
   'function swap(address tokenIn, address tokenOut, uint256 amountIn, uint256 minAmountOut) payable returns (uint256 amountOut)',
@@ -54,6 +54,10 @@ const SWAP_CONTRACT_ABI = [
   'function supportedTokens(address) view returns (bool)',
   'function addSupportedToken(address token, string symbol)',
   'function owner() view returns (address)',
+  'function totalLiquidity() view returns (uint256)',
+  'event Swap(address indexed user, address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut, uint256 fee)',
+  'event LiquidityAdded(address indexed provider, address indexed tokenA, address indexed tokenB, uint256 amountA, uint256 amountB, uint256 liquidity)',
+  'event LiquidityRemoved(address indexed provider, address indexed tokenA, address indexed tokenB, uint256 amountA, uint256 amountB, uint256 liquidity)',
 ] as const;
 
 const ERC20_ABI = [
@@ -93,7 +97,7 @@ const normalizeChainId = (value: unknown): number | null => {
   return null;
 };
 
-const getSwapContractAddress = (): string => {
+export const getSwapContractAddress = (): string => {
   const address = import.meta.env.VITE_SWAP_CONTRACT_ADDRESS;
   if (!address) {
     throw new Error('Missing VITE_SWAP_CONTRACT_ADDRESS. Set it in your .env file.');
