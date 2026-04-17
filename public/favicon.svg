@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="url(#liteforgeGradient)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <defs>
+    <linearGradient id="liteforgeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#9E7FFF" />
+      <stop offset="100%" stop-color="#38bdf8" />
+    </linearGradient>
+  </defs>
+  <!-- Background box -->
+  <rect width="24" height="24" rx="4" fill="#171717" />
+  <!-- A beautiful lightning / zap path -->
+  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="url(#liteforgeGradient)"/>
+</svg>
