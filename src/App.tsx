@@ -95,7 +95,7 @@ function App() {
             Trade Tokens Instantly
           </h2>
           <p className="text-xl text-[#A3A3A3] max-w-2xl mx-auto">
-            Swap zkLTC to any registered token — or sell tokens back for zkLTC — instantly on Liteforge
+            Swap zkLTC to any registered token or sell tokens back for zkLTC instantly on Liteforge
           </p>
         </div>
 
