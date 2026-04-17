@@ -234,10 +234,10 @@ function App() {
                 The leading decentralized exchange on the Liteforge network. Trade with confidence, earn with liquidity.
               </p>
               <div className="flex items-center gap-4">
-                <a href="#" className="p-2 bg-[#262626] hover:bg-[#2F2F2F] rounded-lg transition-colors">
+                <a href="https://x.com/aeemayo" target="_blank" rel="noopener noreferrer" className="p-2 bg-[#262626] hover:bg-[#2F2F2F] rounded-lg transition-colors">
                   <Twitter className="w-5 h-5 text-[#A3A3A3]" />
                 </a>
-                <a href="#" className="p-2 bg-[#262626] hover:bg-[#2F2F2F] rounded-lg transition-colors">
+                <a href="https://github.com/aeemayo" target="_blank" rel="noopener noreferrer" className="p-2 bg-[#262626] hover:bg-[#2F2F2F] rounded-lg transition-colors">
                   <Github className="w-5 h-5 text-[#A3A3A3]" />
                 </a>
                 <a href="#" className="p-2 bg-[#262626] hover:bg-[#2F2F2F] rounded-lg transition-colors">
