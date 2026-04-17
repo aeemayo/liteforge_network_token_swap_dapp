@@ -256,14 +256,12 @@ function App() {
               </ul>
             </div>
 
-            <div>
-              <h3 className="font-semibold mb-4">Resources</h3>
-              <ul className="space-y-2 text-[#A3A3A3]">
-                <li><a href="#" className="hover:text-[#9E7FFF] transition-colors">Documentation</a></li>
-                <li><a href="#" className="hover:text-[#9E7FFF] transition-colors">Smart Contracts</a></li>
-                <li><a href="#" className="hover:text-[#9E7FFF] transition-colors">Security</a></li>
-                <li><a href="#" className="hover:text-[#9E7FFF] transition-colors">Support</a></li>
-              </ul>
+            <div className="flex justify-center md:justify-start items-center">
+              <img 
+                src="/favicon.svg" 
+                alt="Liteforge Swap Logo" 
+                className="w-24 h-24 opacity-50 hover:opacity-100 transition-opacity duration-300 drop-shadow-md filter" 
+              />
             </div>
           </div>
 
