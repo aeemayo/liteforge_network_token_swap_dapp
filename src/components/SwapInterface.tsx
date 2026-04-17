@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { ArrowDownUp, Loader2, AlertCircle, CheckCircle2, TrendingUp, Zap } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ArrowDownUp, Loader2, AlertCircle, CheckCircle2, TrendingUp, Zap, Coins, Wallet } from 'lucide-react';
 import { TokenSelector } from './TokenSelector';
 import { useSwap } from '../hooks/useSwap';
 import { formatTokenAmount, getExplorerTxUrl, getTokenBalance } from '../utils/web3';
 import { Token } from '../utils/tokens';
+
+type SwapDirection = 'buy' | 'sell';
 
 interface SwapInterfaceProps {
   connected: boolean;
@@ -11,6 +13,10 @@ interface SwapInterfaceProps {
   tokens: Token[];
   onImportToken?: (token: Token) => void;
 }
+
+/** Returns the built-in native token (zkLTC) from the token list */
+const findNativeToken = (tokens: Token[]): Token | null =>
+  tokens.find((t) => t.isNative) ?? null;
 
 export const SwapInterface: React.FC<SwapInterfaceProps> = ({
   connected,
@@ -40,6 +46,45 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
   const [tokenOutBalance, setTokenOutBalance] = useState<string | null>(null);
   const [balancesLoading, setBalancesLoading] = useState(false);
 
+  // Direction: "buy" = native → token, "sell" = token → native
+  const [direction, setDirection] = useState<SwapDirection>('buy');
+
+  const nativeToken = useMemo(() => findNativeToken(tokens), [tokens]);
+
+  // Non-native ERC-20 tokens the user can pick
+  const selectableTokens = useMemo(
+    () => tokens.filter((t) => !t.isNative),
+    [tokens],
+  );
+
+  // The "other" token (the non-native side)
+  const otherToken = direction === 'buy' ? tokenOut : tokenIn;
+
+  // ── Bootstrap defaults when tokens arrive ──
+  useEffect(() => {
+    if (!nativeToken) return;
+
+    if (direction === 'buy') {
+      // native → token
+      if (!tokenIn || tokenIn.address !== nativeToken.address) {
+        setTokenIn(nativeToken);
+      }
+      if (!tokenOut && selectableTokens.length > 0) {
+        setTokenOut(selectableTokens[0]);
+      }
+    } else {
+      // token → native
+      if (!tokenOut || tokenOut.address !== nativeToken.address) {
+        setTokenOut(nativeToken);
+      }
+      if (!tokenIn && selectableTokens.length > 0) {
+        setTokenIn(selectableTokens[0]);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nativeToken, direction, tokens.length]);
+
+  // ── Fetch balances ──
   useEffect(() => {
     let active = true;
 
@@ -84,11 +129,23 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
     };
   }, [connected, walletAddress, tokenIn, tokenOut, showSuccess]);
 
-  useEffect(() => {
-    if (!tokenIn && tokens.length > 0) {
-      setTokenIn(tokens[0]);
+  // ── Handlers ──
+
+  const handleDirectionChange = (newDir: SwapDirection) => {
+    if (newDir === direction) return;
+    setDirection(newDir);
+    // Flip tokens & clear input
+    switchTokens();
+  };
+
+  /** Called when the user picks a different token on the non-native side */
+  const handleOtherTokenChange = (token: Token) => {
+    if (direction === 'buy') {
+      setTokenOut(token);
+    } else {
+      setTokenIn(token);
     }
-  }, [tokenIn, tokens, setTokenIn]);
+  };
 
   const handleSwap = async () => {
     try {
@@ -97,8 +154,19 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
       setShowSuccess(true);
       setAmountIn('');
       setTimeout(() => setShowSuccess(false), 5000);
-    } catch (err) {
+    } catch {
       // Error is handled by useSwap hook
+    }
+  };
+
+  const handleMax = () => {
+    if (!tokenInBalance) return;
+    // Leave a small gas buffer for native token
+    if (tokenIn?.isNative) {
+      const maxVal = Math.max(0, parseFloat(tokenInBalance) - 0.005);
+      setAmountIn(maxVal > 0 ? maxVal.toFixed(6) : '0');
+    } else {
+      setAmountIn(tokenInBalance);
     }
   };
 
@@ -106,65 +174,148 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
   const explorerUrl = txHash ? getExplorerTxUrl(txHash) : null;
 
   const pendingLabel = (() => {
-    if (swapStatus === 'approving') {
-      return 'Approval transaction pending...';
-    }
-    if (swapStatus === 'swapping') {
-      return 'Swap transaction pending...';
-    }
-    if (swapStatus === 'checking-allowance') {
-      return 'Checking token allowance...';
-    }
+    if (swapStatus === 'approving') return 'Approval transaction pending...';
+    if (swapStatus === 'swapping') return 'Swap transaction pending...';
+    if (swapStatus === 'checking-allowance') return 'Checking token allowance...';
     return 'Preparing transaction...';
   })();
+
+  const directionLabel = direction === 'buy'
+    ? `${nativeToken?.symbol ?? 'Native'} → ${otherToken?.symbol ?? 'Token'}`
+    : `${otherToken?.symbol ?? 'Token'} → ${nativeToken?.symbol ?? 'Native'}`;
 
   return (
     <div className="w-full max-w-lg">
       <div className="bg-[#262626] rounded-2xl border border-[#2F2F2F] p-6 backdrop-blur-xl bg-opacity-80">
-        {/* From Token */}
+
+        {/* ── Direction Tabs ── */}
+        <div className="flex items-center gap-2 mb-5">
+          <button
+            onClick={() => handleDirectionChange('buy')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 ${
+              direction === 'buy'
+                ? 'bg-gradient-to-r from-[#9E7FFF]/20 to-[#38bdf8]/20 border border-[#9E7FFF]/40 text-[#FFFFFF] shadow-lg shadow-[#9E7FFF]/10'
+                : 'bg-[#171717] border border-[#2F2F2F] text-[#A3A3A3] hover:text-[#FFFFFF] hover:border-[#9E7FFF]/30'
+            }`}
+          >
+            <Coins className="w-4 h-4" />
+            Buy Token
+          </button>
+          <button
+            onClick={() => handleDirectionChange('sell')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 ${
+              direction === 'sell'
+                ? 'bg-gradient-to-r from-[#f472b6]/20 to-[#9E7FFF]/20 border border-[#f472b6]/40 text-[#FFFFFF] shadow-lg shadow-[#f472b6]/10'
+                : 'bg-[#171717] border border-[#2F2F2F] text-[#A3A3A3] hover:text-[#FFFFFF] hover:border-[#f472b6]/30'
+            }`}
+          >
+            <Wallet className="w-4 h-4" />
+            Sell Token
+          </button>
+        </div>
+
+        {/* ── Direction Badge ── */}
+        <div className="flex items-center justify-center mb-4">
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-[#171717] rounded-full border border-[#2F2F2F] text-xs text-[#A3A3A3]">
+            <div className={`w-1.5 h-1.5 rounded-full ${direction === 'buy' ? 'bg-[#9E7FFF]' : 'bg-[#f472b6]'} animate-pulse`} />
+            {directionLabel}
+          </div>
+        </div>
+
+        {/* ── From Token ── */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <label className="text-sm text-[#A3A3A3]">From</label>
+            <label className="text-sm text-[#A3A3A3]">
+              From
+              {tokenIn?.isNative && (
+                <span className="ml-2 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-[#9E7FFF]/20 text-[#9E7FFF] uppercase tracking-wide">
+                  Native
+                </span>
+              )}
+              {tokenIn && !tokenIn.isNative && (
+                <span className="ml-2 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-[#38bdf8]/20 text-[#38bdf8] uppercase tracking-wide">
+                  ERC-20
+                </span>
+              )}
+            </label>
             {tokenIn && (
-              <div className="text-sm text-[#A3A3A3]">
-                Balance: {balancesLoading ? '...' : tokenInBalance ? formatTokenAmount(tokenInBalance, 4) : '0'}
+              <div className="flex items-center gap-2 text-sm text-[#A3A3A3]">
+                <span>
+                  Balance: {balancesLoading ? '...' : tokenInBalance ? formatTokenAmount(tokenInBalance, 4) : '0'}
+                </span>
+                {tokenInBalance && parseFloat(tokenInBalance) > 0 && (
+                  <button
+                    onClick={handleMax}
+                    className="px-2 py-0.5 text-[10px] font-bold rounded bg-[#9E7FFF]/20 text-[#9E7FFF] hover:bg-[#9E7FFF]/30 transition-colors uppercase tracking-wide"
+                  >
+                    Max
+                  </button>
+                )}
               </div>
             )}
           </div>
-          <div className="flex items-center gap-3 p-4 bg-[#171717] rounded-xl border border-[#2F2F2F]">
+          <div className="flex items-center gap-3 p-4 bg-[#171717] rounded-xl border border-[#2F2F2F] transition-all duration-200 focus-within:border-[#9E7FFF]/50">
             <input
               type="number"
               placeholder="0.0"
               value={amountIn}
               onChange={(e) => setAmountIn(e.target.value)}
               disabled={!connected}
-              className="flex-1 bg-transparent text-2xl text-[#FFFFFF] outline-none placeholder:text-[#A3A3A3] disabled:opacity-50"
+              className="flex-1 bg-transparent text-2xl text-[#FFFFFF] outline-none placeholder:text-[#A3A3A3] disabled:opacity-50 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
             />
-            <TokenSelector
-              selectedToken={tokenIn}
-              onSelect={setTokenIn}
-              tokens={tokens}
-              excludeToken={tokenOut}
-              onImportToken={onImportToken}
-            />
+            {/* Native side is locked, ERC-20 side is selectable */}
+            {direction === 'buy' ? (
+              /* Buy mode: "From" is native — show locked native display */
+              <div className="flex items-center gap-2 px-4 py-3 bg-[#262626] rounded-xl border border-[#2F2F2F] min-w-[160px]">
+                {nativeToken && (
+                  <>
+                    <img src={nativeToken.logoUrl} alt={nativeToken.symbol} className="w-8 h-8 rounded-full ring-2 ring-[#9E7FFF]/30" />
+                    <div className="flex-1 text-left">
+                      <div className="text-[#FFFFFF] font-semibold">{nativeToken.symbol}</div>
+                      <div className="text-xs text-[#A3A3A3]">Native</div>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              /* Sell mode: "From" is ERC-20 — show selector */
+              <TokenSelector
+                selectedToken={tokenIn}
+                onSelect={handleOtherTokenChange}
+                tokens={selectableTokens}
+                excludeToken={tokenOut}
+                onImportToken={onImportToken}
+              />
+            )}
           </div>
         </div>
 
-        {/* Switch Button */}
+        {/* ── Switch Button ── */}
         <div className="flex justify-center -my-2 relative z-10">
           <button
-            onClick={switchTokens}
-            disabled={!tokenIn || !tokenOut}
-            className="p-3 bg-[#262626] hover:bg-[#2F2F2F] rounded-xl border-4 border-[#171717] transition-all duration-200 hover:scale-110 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+            onClick={() => handleDirectionChange(direction === 'buy' ? 'sell' : 'buy')}
+            className="group p-3 bg-[#262626] hover:bg-[#2F2F2F] rounded-xl border-4 border-[#171717] transition-all duration-300 hover:scale-110 hover:rotate-180"
           >
-            <ArrowDownUp className="w-5 h-5 text-[#9E7FFF]" />
+            <ArrowDownUp className={`w-5 h-5 transition-colors duration-300 ${direction === 'buy' ? 'text-[#9E7FFF]' : 'text-[#f472b6]'}`} />
           </button>
         </div>
 
-        {/* To Token */}
+        {/* ── To Token ── */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <label className="text-sm text-[#A3A3A3]">To</label>
+            <label className="text-sm text-[#A3A3A3]">
+              To
+              {tokenOut?.isNative && (
+                <span className="ml-2 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-[#9E7FFF]/20 text-[#9E7FFF] uppercase tracking-wide">
+                  Native
+                </span>
+              )}
+              {tokenOut && !tokenOut.isNative && (
+                <span className="ml-2 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-[#38bdf8]/20 text-[#38bdf8] uppercase tracking-wide">
+                  ERC-20
+                </span>
+              )}
+            </label>
             {tokenOut && (
               <div className="text-sm text-[#A3A3A3]">
                 Balance: {balancesLoading ? '...' : tokenOutBalance ? formatTokenAmount(tokenOutBalance, 4) : '0'}
@@ -179,17 +330,33 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
               disabled
               className="flex-1 bg-transparent text-2xl text-[#FFFFFF] outline-none placeholder:text-[#A3A3A3]"
             />
-            <TokenSelector
-              selectedToken={tokenOut}
-              onSelect={setTokenOut}
-              tokens={tokens}
-              excludeToken={tokenIn}
-              onImportToken={onImportToken}
-            />
+            {direction === 'sell' ? (
+              /* Sell mode: "To" is native — show locked native display */
+              <div className="flex items-center gap-2 px-4 py-3 bg-[#262626] rounded-xl border border-[#2F2F2F] min-w-[160px]">
+                {nativeToken && (
+                  <>
+                    <img src={nativeToken.logoUrl} alt={nativeToken.symbol} className="w-8 h-8 rounded-full ring-2 ring-[#9E7FFF]/30" />
+                    <div className="flex-1 text-left">
+                      <div className="text-[#FFFFFF] font-semibold">{nativeToken.symbol}</div>
+                      <div className="text-xs text-[#A3A3A3]">Native</div>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              /* Buy mode: "To" is ERC-20 — show selector */
+              <TokenSelector
+                selectedToken={tokenOut}
+                onSelect={handleOtherTokenChange}
+                tokens={selectableTokens}
+                excludeToken={tokenIn}
+                onImportToken={onImportToken}
+              />
+            )}
           </div>
         </div>
 
-        {/* Quote Details */}
+        {/* ── Quote Details ── */}
         {quote && !loading && (
           <div className="mt-4 p-4 bg-[#171717] rounded-xl border border-[#2F2F2F] space-y-2">
             <div className="flex items-center justify-between text-sm">
@@ -221,7 +388,7 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
           </div>
         )}
 
-        {/* Error Message */}
+        {/* ── Error Message ── */}
         {error && (
           <div className="mt-4 p-4 bg-[#ef4444] bg-opacity-10 border border-[#ef4444] rounded-xl flex items-center gap-2">
             <AlertCircle className="w-5 h-5 text-[#ef4444] flex-shrink-0" />
@@ -236,7 +403,7 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
           </div>
         )}
 
-        {/* Success Message */}
+        {/* ── Success Message ── */}
         {showSuccess && txHash && (
           <div className="mt-4 p-4 bg-[#10b981] bg-opacity-10 border border-[#10b981] rounded-xl">
             <div className="flex items-center gap-2 mb-2">
@@ -259,11 +426,15 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
           </div>
         )}
 
-        {/* Swap Button */}
+        {/* ── Swap Button ── */}
         <button
           onClick={handleSwap}
           disabled={!canSwap}
-          className="w-full mt-6 py-4 bg-gradient-to-r from-[#9E7FFF] to-[#38bdf8] hover:from-[#8B6FE6] hover:to-[#2BA5D9] text-white rounded-xl font-semibold text-lg transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center gap-2"
+          className={`w-full mt-6 py-4 rounded-xl font-semibold text-lg transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 flex items-center justify-center gap-2 text-white ${
+            direction === 'buy'
+              ? 'bg-gradient-to-r from-[#9E7FFF] to-[#38bdf8] hover:from-[#8B6FE6] hover:to-[#2BA5D9]'
+              : 'bg-gradient-to-r from-[#f472b6] to-[#9E7FFF] hover:from-[#e060a0] hover:to-[#8B6FE6]'
+          }`}
         >
           {!connected ? (
             'Connect Wallet'
@@ -276,10 +447,31 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
             'Select Tokens'
           ) : !amountIn ? (
             'Enter Amount'
+          ) : selectableTokens.length === 0 ? (
+            'No Registered Tokens'
           ) : (
-            'Swap'
+            <>
+              {direction === 'buy' ? (
+                <>
+                  <Coins className="w-5 h-5" />
+                  Buy {tokenOut?.symbol}
+                </>
+              ) : (
+                <>
+                  <Wallet className="w-5 h-5" />
+                  Sell {tokenIn?.symbol}
+                </>
+              )}
+            </>
           )}
         </button>
+
+        {/* ── No tokens hint ── */}
+        {connected && selectableTokens.length === 0 && (
+          <p className="mt-3 text-center text-xs text-[#A3A3A3]">
+            No ERC-20 tokens registered yet. Use the Contract Admin panel to register tokens.
+          </p>
+        )}
       </div>
     </div>
   );

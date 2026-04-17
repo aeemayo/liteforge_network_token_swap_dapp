@@ -92,11 +92,18 @@ export const TokenSelector: React.FC<TokenSelectorProps> = ({
       >
         {selectedToken ? (
           <>
-            <img
-              src={selectedToken.logoUrl}
-              alt={selectedToken.symbol}
-              className="w-8 h-8 rounded-full"
-            />
+            <div className="relative">
+              <img
+                src={selectedToken.logoUrl}
+                alt={selectedToken.symbol}
+                className="w-8 h-8 rounded-full"
+              />
+              {selectedToken.isNative && (
+                <div className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-[#9E7FFF] rounded-full flex items-center justify-center">
+                  <span className="text-[6px] font-bold text-white">N</span>
+                </div>
+              )}
+            </div>
             <div className="flex-1 text-left">
               <div className="text-[#FFFFFF] font-semibold">{selectedToken.symbol}</div>
               <div className="text-xs text-[#A3A3A3]">{selectedToken.name}</div>
@@ -174,13 +181,29 @@ export const TokenSelector: React.FC<TokenSelectorProps> = ({
                   onClick={() => handleSelect(token)}
                   className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[#2F2F2F] transition-colors"
                 >
-                  <img
-                    src={token.logoUrl}
-                    alt={token.symbol}
-                    className="w-10 h-10 rounded-full"
-                  />
+                  <div className="relative flex-shrink-0">
+                    <img
+                      src={token.logoUrl}
+                      alt={token.symbol}
+                      className="w-10 h-10 rounded-full"
+                    />
+                    {token.isNative && (
+                      <div className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-[#9E7FFF] rounded-full flex items-center justify-center">
+                        <span className="text-[7px] font-bold text-white">N</span>
+                      </div>
+                    )}
+                  </div>
                   <div className="flex-1 text-left">
-                    <div className="text-[#FFFFFF] font-semibold">{token.symbol}</div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[#FFFFFF] font-semibold">{token.symbol}</span>
+                      <span className={`px-1.5 py-0.5 text-[9px] font-semibold rounded tracking-wide uppercase ${
+                        token.isNative
+                          ? 'bg-[#9E7FFF]/20 text-[#9E7FFF]'
+                          : 'bg-[#38bdf8]/20 text-[#38bdf8]'
+                      }`}>
+                        {token.isNative ? 'Native' : 'ERC-20'}
+                      </span>
+                    </div>
                     <div className="text-sm text-[#A3A3A3]">{token.name}</div>
                   </div>
                 </button>
