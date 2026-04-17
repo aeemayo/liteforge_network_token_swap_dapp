@@ -69,7 +69,7 @@ const ERC20_ABI = [
   'function decimals() view returns (uint8)',
 ] as const;
 
-const FALLBACK_TOKEN_LOGO_URL = 'https://images.unsplash.com/photo-1621416894569-0f39ed31d247?w=100&h=100&fit=crop';
+const FALLBACK_TOKEN_LOGO_URL = '/liteforge-logo.png';
 const NATIVE_ZKLTC_PLACEHOLDER_ADDRESS = '0x0000000000000000000000000000000000000001';
 
 const requireEthereumProvider = (): EthereumProvider => {

@@ -14,7 +14,7 @@ export const LITEFORGE_TOKENS: Token[] = [
     symbol: 'zkLTC',
     name: 'zkLitecoin',
     decimals: 18,
-    logoUrl: 'https://images.unsplash.com/photo-1621416894569-0f39ed31d247?w=100&h=100&fit=crop',
+    logoUrl: '/liteforge-logo.png',
     isNative: true,
   },
 ];
