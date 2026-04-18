@@ -266,7 +266,7 @@ function App() {
           </div>
 
           <div className="border-t border-[#2F2F2F] mt-8 pt-8 text-center text-[#A3A3A3] text-sm">
-            <p>© 2025 Liteforge Swap. All rights reserved.</p>
+            <p>© 2026 Liteforge Swap. All rights reserved.</p>
           </div>
         </div>
       </footer>
