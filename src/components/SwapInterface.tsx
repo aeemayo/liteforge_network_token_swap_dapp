@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowDownUp, Loader2, AlertCircle, CheckCircle2, TrendingUp, Zap, Coins, Wallet } from 'lucide-react';
+import { ArrowDownUp, Loader2, AlertCircle, CheckCircle2, TrendingUp, Zap, Coins, Wallet, Settings } from 'lucide-react';
 import { TokenSelector } from './TokenSelector';
 import { useSwap } from '../hooks/useSwap';
 import { formatTokenAmount, getExplorerTxUrl, getTokenBalance } from '../utils/web3';
@@ -33,12 +33,16 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
     swapping,
     swapStatus,
     error,
+    slippageBps,
+    setSlippageBps,
     setTokenIn,
     setTokenOut,
     setAmountIn,
     swap,
     switchTokens,
   } = useSwap();
+
+  const [showSettings, setShowSettings] = useState(false);
 
   const [txHash, setTxHash] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -212,7 +216,38 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
             <Wallet className="w-4 h-4" />
             Sell Token
           </button>
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className="p-2.5 rounded-xl text-[#A3A3A3] hover:text-[#FFFFFF] bg-[#171717] border border-[#2F2F2F] hover:border-[#9E7FFF]/30 transition-all duration-300"
+          >
+            <Settings className="w-5 h-5" />
+          </button>
         </div>
+
+        {/* ── Settings Panel ── */}
+        {showSettings && (
+          <div className="mb-5 p-4 bg-[#171717] rounded-xl border border-[#2F2F2F] space-y-3 animate-in fade-in slide-in-from-top-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-[#A3A3A3]">Slippage Tolerance</span>
+              <span className="text-sm text-[#FFFFFF]">{slippageBps / 100}%</span>
+            </div>
+            <div className="flex gap-2">
+              {[10, 50, 100].map((bps) => (
+                <button
+                  key={bps}
+                  onClick={() => setSlippageBps(bps)}
+                  className={`flex-1 py-1.5 rounded-lg text-sm font-semibold transition-all ${
+                    slippageBps === bps
+                      ? 'bg-[#9E7FFF] text-white'
+                      : 'bg-[#262626] text-[#A3A3A3] hover:bg-[#333] hover:text-white'
+                  }`}
+                >
+                  {bps / 100}%
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ── Direction Badge ── */}
         <div className="flex items-center justify-center mb-4">

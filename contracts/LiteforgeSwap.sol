@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 interface IERC20 {
     function transfer(address to, uint256 amount) external returns (bool);
     function transferFrom(address from, address to, uint256 amount) external returns (bool);
+    function balanceOf(address account) external view returns (uint256);
 }
 
 /**
@@ -18,11 +19,11 @@ contract LiteforgeSwap {
 
     // State variables
     address public owner;
-    uint256 public totalLiquidity;
     uint256 public feePercentage = 30; // 0.3% fee (30 basis points)
     
-    // Liquidity provider tracking
-    mapping(address => uint256) public liquidityBalance;
+    // Liquidity provider tracking (pair-specific)
+    mapping(address => mapping(address => mapping(address => uint256))) public liquidityBalance;
+    mapping(address => mapping(address => uint256)) public totalLiquidity;
     
     // Token pair reserves
     mapping(address => mapping(address => uint256)) public reserves;
@@ -99,11 +100,24 @@ contract LiteforgeSwap {
         return token == NATIVE_TOKEN;
     }
 
-    function _pullTokens(address token, address from, uint256 amount) internal {
+    function _safeTransfer(address token, address to, uint256 amount) internal {
+        (bool success, bytes memory data) = token.call(abi.encodeWithSelector(IERC20.transfer.selector, to, amount));
+        require(success && (data.length == 0 || abi.decode(data, (bool))), "ERC-20 transfer failed");
+    }
+
+    function _safeTransferFrom(address token, address from, address to, uint256 amount) internal {
+        (bool success, bytes memory data) = token.call(abi.encodeWithSelector(IERC20.transferFrom.selector, from, to, amount));
+        require(success && (data.length == 0 || abi.decode(data, (bool))), "ERC-20 transferFrom failed");
+    }
+
+    function _pullTokensAndGetReceived(address token, address from, uint256 amount) internal returns (uint256) {
         if (_isNative(token)) {
             require(msg.value == amount, "Native amount mismatch");
+            return amount;
         } else {
-            require(IERC20(token).transferFrom(from, address(this), amount), "ERC-20 transferFrom failed");
+            uint256 balanceBefore = IERC20(token).balanceOf(address(this));
+            _safeTransferFrom(token, from, address(this), amount);
+            return IERC20(token).balanceOf(address(this)) - balanceBefore;
         }
     }
 
@@ -112,7 +126,7 @@ contract LiteforgeSwap {
             (bool sent, ) = payable(to).call{value: amount}("");
             require(sent, "Native transfer failed");
         } else {
-            require(IERC20(token).transfer(to, amount), "ERC-20 transfer failed");
+            _safeTransfer(token, to, amount);
         }
     }
 
@@ -172,36 +186,36 @@ contract LiteforgeSwap {
             (amountA, amountB) = (amountB, amountA);
         }
         
+        uint256 receivedA = _pullTokensAndGetReceived(tokenA, msg.sender, amountA);
+        uint256 receivedB = _pullTokensAndGetReceived(tokenB, msg.sender, amountB);
+        
         uint256 reserveA = reserves[tokenA][tokenB];
         uint256 reserveB = reserves[tokenB][tokenA];
         
-        if (reserveA == 0 && reserveB == 0) {
-            liquidity = sqrt(amountA * amountB);
+        uint256 _totalLiquidity = totalLiquidity[tokenA][tokenB];
+        
+        if (_totalLiquidity == 0) {
+            liquidity = sqrt(receivedA * receivedB);
+            require(liquidity > 1000, "Insufficient initial liquidity");
+            liquidity -= 1000;
+            totalLiquidity[tokenA][tokenB] += 1000; // Permanently lock minimum liquidity
         } else {
-            uint256 liquidityA = (amountA * totalLiquidity) / reserveA;
-            uint256 liquidityB = (amountB * totalLiquidity) / reserveB;
+            uint256 liquidityA = (receivedA * _totalLiquidity) / reserveA;
+            uint256 liquidityB = (receivedB * _totalLiquidity) / reserveB;
             liquidity = liquidityA < liquidityB ? liquidityA : liquidityB;
         }
         
         require(liquidity > 0, "Insufficient liquidity minted");
 
-        // Pull tokens (native already received via msg.value)
-        if (!_isNative(tokenA)) {
-            require(IERC20(tokenA).transferFrom(msg.sender, address(this), amountA), "TokenA transfer failed");
-        }
-        if (!_isNative(tokenB)) {
-            require(IERC20(tokenB).transferFrom(msg.sender, address(this), amountB), "TokenB transfer failed");
-        }
-        
         // Update reserves
-        reserves[tokenA][tokenB] += amountA;
-        reserves[tokenB][tokenA] += amountB;
+        reserves[tokenA][tokenB] += receivedA;
+        reserves[tokenB][tokenA] += receivedB;
         
         // Update liquidity tracking
-        liquidityBalance[msg.sender] += liquidity;
-        totalLiquidity += liquidity;
+        liquidityBalance[tokenA][tokenB][msg.sender] += liquidity;
+        totalLiquidity[tokenA][tokenB] += liquidity;
         
-        emit LiquidityAdded(msg.sender, tokenA, tokenB, amountA, amountB, liquidity);
+        emit LiquidityAdded(msg.sender, tokenA, tokenB, receivedA, receivedB, liquidity);
     }
     
     /**
@@ -213,30 +227,34 @@ contract LiteforgeSwap {
         uint256 liquidity
     ) external nonReentrant returns (uint256 amountA, uint256 amountB) {
         require(liquidity > 0, "Liquidity must be greater than 0");
-        require(liquidityBalance[msg.sender] >= liquidity, "Insufficient liquidity balance");
         
-        if (tokenA > tokenB) {
-            (tokenA, tokenB) = (tokenB, tokenA);
-        }
+        address token0 = tokenA < tokenB ? tokenA : tokenB;
+        address token1 = tokenA < tokenB ? tokenB : tokenA;
         
-        uint256 reserveA = reserves[tokenA][tokenB];
-        uint256 reserveB = reserves[tokenB][tokenA];
+        require(liquidityBalance[token0][token1][msg.sender] >= liquidity, "Insufficient liquidity balance");
         
-        require(reserveA > 0 && reserveB > 0, "No liquidity in pool");
+        uint256 reserve0 = reserves[token0][token1];
+        uint256 reserve1 = reserves[token1][token0];
+        uint256 _totalLiquidity = totalLiquidity[token0][token1];
         
-        amountA = (liquidity * reserveA) / totalLiquidity;
-        amountB = (liquidity * reserveB) / totalLiquidity;
+        require(reserve0 > 0 && reserve1 > 0, "No liquidity in pool");
         
-        require(amountA > 0 && amountB > 0, "Insufficient liquidity burned");
+        uint256 amount0 = (liquidity * reserve0) / _totalLiquidity;
+        uint256 amount1 = (liquidity * reserve1) / _totalLiquidity;
         
-        reserves[tokenA][tokenB] -= amountA;
-        reserves[tokenB][tokenA] -= amountB;
+        require(amount0 > 0 && amount1 > 0, "Insufficient liquidity burned");
+        
+        // CEI: Update state before external calls
+        reserves[token0][token1] -= amount0;
+        reserves[token1][token0] -= amount1;
+        liquidityBalance[token0][token1][msg.sender] -= liquidity;
+        totalLiquidity[token0][token1] -= liquidity;
 
-        _pushTokens(tokenA, msg.sender, amountA);
-        _pushTokens(tokenB, msg.sender, amountB);
+        _pushTokens(token0, msg.sender, amount0);
+        _pushTokens(token1, msg.sender, amount1);
         
-        liquidityBalance[msg.sender] -= liquidity;
-        totalLiquidity -= liquidity;
+        amountA = tokenA == token0 ? amount0 : amount1;
+        amountB = tokenA == token0 ? amount1 : amount0;
         
         emit LiquidityRemoved(msg.sender, tokenA, tokenB, amountA, amountB, liquidity);
     }
@@ -264,13 +282,15 @@ contract LiteforgeSwap {
             require(msg.value == 0, "No native value expected for ERC-20 swap");
         }
         
+        uint256 receivedIn = _pullTokensAndGetReceived(tokenIn, msg.sender, amountIn);
+        
         uint256 reserveIn = reserves[tokenIn][tokenOut];
         uint256 reserveOut = reserves[tokenOut][tokenIn];
         
         require(reserveIn > 0 && reserveOut > 0, "Insufficient liquidity");
         
-        uint256 amountInWithFee = amountIn * (10000 - feePercentage);
-        uint256 fee = amountIn * feePercentage / 10000;
+        uint256 amountInWithFee = receivedIn * (10000 - feePercentage);
+        uint256 fee = (receivedIn * feePercentage) / 10000;
         
         amountOut = (amountInWithFee * reserveOut) / (reserveIn * 10000 + amountInWithFee);
         
@@ -278,18 +298,14 @@ contract LiteforgeSwap {
         require(amountOut < reserveOut, "Insufficient liquidity for swap");
         require(amountOut >= minAmountOut, "Slippage exceeded");
 
-        // Pull input (native already received via msg.value)
-        if (!_isNative(tokenIn)) {
-            require(IERC20(tokenIn).transferFrom(msg.sender, address(this), amountIn), "Input transfer failed");
-        }
+        // CEI: Update reserves before pushing output
+        reserves[tokenIn][tokenOut] += receivedIn;
+        reserves[tokenOut][tokenIn] -= amountOut;
+
         // Push output
         _pushTokens(tokenOut, msg.sender, amountOut);
         
-        // Update reserves
-        reserves[tokenIn][tokenOut] += amountIn;
-        reserves[tokenOut][tokenIn] -= amountOut;
-        
-        emit Swap(msg.sender, tokenIn, tokenOut, amountIn, amountOut, fee);
+        emit Swap(msg.sender, tokenIn, tokenOut, receivedIn, amountOut, fee);
     }
     
     // ── Quotes & views ──────────────────────────────────────────────

@@ -78,13 +78,7 @@ export const useAnalytics = (
 
         const contract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, provider);
 
-        // ── 1. Total liquidity from contract state ──
         let totalLiqWei = 0n;
-        try {
-          totalLiqWei = (await contract.totalLiquidity()) as bigint;
-        } catch {
-          // Older contract may not have this
-        }
 
         // ── 2. Query Swap events ──
         const latestBlock = await provider.getBlockNumber();
@@ -134,6 +128,13 @@ export const useAnalytics = (
 
                 if (rA > 0n && rB > 0n) {
                   activePools++;
+
+                  try {
+                    const pairLiq = (await contract.totalLiquidity(tokens[i].address, tokens[j].address)) as bigint;
+                    totalLiqWei += pairLiq;
+                  } catch {
+                    // Older contract may not have this
+                  }
 
                   // If one side is native, count both sides as value
                   // (the native side = direct value, ERC-20 side ≈ same value by AMM invariant)

@@ -43,7 +43,6 @@ declare global {
 }
 
 const LITEFORGE_CHAIN_ID = Number(import.meta.env.VITE_LITEFORGE_CHAIN_ID ?? 4441);
-const DEFAULT_SLIPPAGE_BPS = 50; // 0.5%
 
 export const SWAP_CONTRACT_ABI = [
   'function getSwapQuote(address tokenIn, address tokenOut, uint256 amountIn) view returns (uint256 amountOut, uint256 fee)',
@@ -54,7 +53,7 @@ export const SWAP_CONTRACT_ABI = [
   'function supportedTokens(address) view returns (bool)',
   'function addSupportedToken(address token, string symbol)',
   'function owner() view returns (address)',
-  'function totalLiquidity() view returns (uint256)',
+  'function totalLiquidity(address, address) view returns (uint256)',
   'event Swap(address indexed user, address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut, uint256 fee)',
   'event LiquidityAdded(address indexed provider, address indexed tokenA, address indexed tokenB, uint256 amountA, uint256 amountB, uint256 liquidity)',
   'event LiquidityRemoved(address indexed provider, address indexed tokenA, address indexed tokenB, uint256 amountA, uint256 amountB, uint256 liquidity)',
@@ -511,7 +510,8 @@ export const getTokenBalance = async (
 export const getSwapQuote = async (
   tokenIn: Token,
   tokenOut: Token,
-  amountIn: string
+  amountIn: string,
+  slippageBps: number = 50
 ): Promise<SwapQuote> => {
   const amountInNum = parseFloat(amountIn);
   if (isNaN(amountInNum) || amountInNum <= 0) {
@@ -594,7 +594,7 @@ export const getSwapQuote = async (
     }
   }
 
-  const minimumReceivedWei = (amountOutWei * BigInt(10000 - DEFAULT_SLIPPAGE_BPS)) / 10000n;
+  const minimumReceivedWei = (amountOutWei * BigInt(10000 - slippageBps)) / 10000n;
   const minimumReceived = toDisplayAmount(minimumReceivedWei, tokenOut.decimals);
   
   return {

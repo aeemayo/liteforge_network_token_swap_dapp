@@ -11,6 +11,7 @@ export const useSwap = () => {
   const [swapping, setSwapping] = useState(false);
   const [swapStatus, setSwapStatus] = useState<SwapExecutionStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [slippageBps, setSlippageBps] = useState<number>(50); // 0.5% default
 
   useEffect(() => {
     const fetchQuote = async () => {
@@ -22,7 +23,7 @@ export const useSwap = () => {
       try {
         setLoading(true);
         setError(null);
-        const swapQuote = await getSwapQuote(tokenIn, tokenOut, amountIn);
+        const swapQuote = await getSwapQuote(tokenIn, tokenOut, amountIn, slippageBps);
         setQuote(swapQuote);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to fetch quote');
@@ -34,7 +35,7 @@ export const useSwap = () => {
 
     const debounce = setTimeout(fetchQuote, 500);
     return () => clearTimeout(debounce);
-  }, [tokenIn, tokenOut, amountIn]);
+  }, [tokenIn, tokenOut, amountIn, slippageBps]);
 
   const swap = async () => {
     if (!tokenIn || !tokenOut || !amountIn || !quote) {
@@ -80,6 +81,8 @@ export const useSwap = () => {
     swapping,
     swapStatus,
     error,
+    slippageBps,
+    setSlippageBps,
     setTokenIn,
     setTokenOut,
     setAmountIn,
