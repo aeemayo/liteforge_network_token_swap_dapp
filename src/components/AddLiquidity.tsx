@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Plus, Loader2, CheckCircle2, AlertCircle, Droplets } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Plus, Loader2, CheckCircle2, AlertCircle, Droplets, AlertTriangle } from 'lucide-react';
 import { Token } from '../utils/tokens';
 import { executeAddLiquidity, LiquidityStatus, getTokenBalance, formatTokenAmount } from '../utils/web3';
 import { TokenSelector } from './TokenSelector';
@@ -89,6 +89,21 @@ export const AddLiquidity: React.FC<AddLiquidityProps> = ({
     return 'Processing...';
   })();
 
+  // Insufficient balance checks
+  const insufficientA = useMemo(() => {
+    if (!amountA || !balA) return false;
+    const inputVal = parseFloat(amountA);
+    const balVal = parseFloat(balA);
+    return !isNaN(inputVal) && !isNaN(balVal) && inputVal > balVal;
+  }, [amountA, balA]);
+
+  const insufficientB = useMemo(() => {
+    if (!amountB || !balB) return false;
+    const inputVal = parseFloat(amountB);
+    const balVal = parseFloat(balB);
+    return !isNaN(inputVal) && !isNaN(balVal) && inputVal > balVal;
+  }, [amountB, balB]);
+
   const canSubmit =
     connected &&
     tokenA &&
@@ -98,7 +113,9 @@ export const AddLiquidity: React.FC<AddLiquidityProps> = ({
     amountB &&
     parseFloat(amountA) > 0 &&
     parseFloat(amountB) > 0 &&
-    !submitting;
+    !submitting &&
+    !insufficientA &&
+    !insufficientB;
 
   if (!connected) return null;
 
@@ -145,8 +162,18 @@ export const AddLiquidity: React.FC<AddLiquidityProps> = ({
                 placeholder="0.0"
                 value={amountA}
                 onChange={(e) => setAmountA(e.target.value)}
-                className="w-full px-4 py-3 bg-[#171717] text-xl text-[#FFFFFF] rounded-xl border border-[#2F2F2F] outline-none focus:border-[#9E7FFF] placeholder:text-[#A3A3A3]"
+                className={`w-full px-4 py-3 bg-[#171717] text-xl rounded-xl border outline-none placeholder:text-[#A3A3A3] ${
+                  insufficientA
+                    ? 'text-[#f59e0b] border-[#f59e0b]/50 focus:border-[#f59e0b]'
+                    : 'text-[#FFFFFF] border-[#2F2F2F] focus:border-[#9E7FFF]'
+                }`}
               />
+              {insufficientA && (
+                <div className="flex items-center gap-1.5 mt-1">
+                  <AlertTriangle className="w-3.5 h-3.5 text-[#f59e0b] flex-shrink-0" />
+                  <span className="text-xs font-medium text-[#f59e0b]">Insufficient {tokenA?.symbol} balance</span>
+                </div>
+              )}
             </div>
 
             {/* Token B */}
@@ -171,8 +198,18 @@ export const AddLiquidity: React.FC<AddLiquidityProps> = ({
                 placeholder="0.0"
                 value={amountB}
                 onChange={(e) => setAmountB(e.target.value)}
-                className="w-full px-4 py-3 bg-[#171717] text-xl text-[#FFFFFF] rounded-xl border border-[#2F2F2F] outline-none focus:border-[#9E7FFF] placeholder:text-[#A3A3A3]"
+                className={`w-full px-4 py-3 bg-[#171717] text-xl rounded-xl border outline-none placeholder:text-[#A3A3A3] ${
+                  insufficientB
+                    ? 'text-[#f59e0b] border-[#f59e0b]/50 focus:border-[#f59e0b]'
+                    : 'text-[#FFFFFF] border-[#2F2F2F] focus:border-[#9E7FFF]'
+                }`}
               />
+              {insufficientB && (
+                <div className="flex items-center gap-1.5 mt-1">
+                  <AlertTriangle className="w-3.5 h-3.5 text-[#f59e0b] flex-shrink-0" />
+                  <span className="text-xs font-medium text-[#f59e0b]">Insufficient {tokenB?.symbol} balance</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -184,21 +221,18 @@ export const AddLiquidity: React.FC<AddLiquidityProps> = ({
             </div>
           )}
 
-          {/* Result */}
-          {result && (
-            <div className={`mb-4 p-3 rounded-xl border flex items-start gap-2 text-sm ${
-              result.success
-                ? 'bg-[#10b981] bg-opacity-10 border-[#10b981] text-[#10b981]'
-                : 'bg-[#ef4444] bg-opacity-10 border-[#ef4444] text-[#ef4444]'
-            }`}>
-              {result.success ? (
-                <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
-              ) : (
+            {result && !result.success && !insufficientA && !insufficientB && (
+              <div className={`mb-4 p-3 rounded-xl border flex items-start gap-2 text-sm bg-[#ef4444] bg-opacity-10 border-[#ef4444] text-[#ef4444]`}>
                 <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-              )}
-              <span className="break-all">{result.message}</span>
-            </div>
-          )}
+                <span className="break-all">{result.message}</span>
+              </div>
+            )}
+            {result && result.success && (
+              <div className={`mb-4 p-3 rounded-xl border flex items-start gap-2 text-sm bg-[#10b981] bg-opacity-10 border-[#10b981] text-[#10b981]`}>
+                <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <span className="break-all">{result.message}</span>
+              </div>
+            )}
 
           {/* Submit */}
           <button
@@ -217,6 +251,16 @@ export const AddLiquidity: React.FC<AddLiquidityProps> = ({
               'Select both tokens'
             ) : !amountA || !amountB ? (
               'Enter amounts'
+            ) : insufficientA ? (
+              <>
+                <AlertTriangle className="w-4 h-4" />
+                Insufficient {tokenA.symbol} Balance
+              </>
+            ) : insufficientB ? (
+              <>
+                <AlertTriangle className="w-4 h-4" />
+                Insufficient {tokenB.symbol} Balance
+              </>
             ) : (
               <>
                 <Droplets className="w-4 h-4" />

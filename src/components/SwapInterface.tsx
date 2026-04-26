@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowDownUp, Loader2, AlertCircle, CheckCircle2, TrendingUp, Zap, Coins, Wallet, Settings } from 'lucide-react';
+import { ArrowDownUp, Loader2, AlertCircle, CheckCircle2, TrendingUp, Zap, Coins, Wallet, Settings, AlertTriangle } from 'lucide-react';
 import { TokenSelector } from './TokenSelector';
 import { useSwap } from '../hooks/useSwap';
 import { formatTokenAmount, getExplorerTxUrl, getTokenBalance } from '../utils/web3';
@@ -174,7 +174,15 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
     }
   };
 
-  const canSwap = connected && tokenIn && tokenOut && amountIn && quote && !loading && !swapping;
+  // ── Insufficient balance check ──
+  const insufficientBalance = useMemo(() => {
+    if (!amountIn || !tokenInBalance) return false;
+    const inputVal = parseFloat(amountIn);
+    const balVal = parseFloat(tokenInBalance);
+    return !isNaN(inputVal) && !isNaN(balVal) && inputVal > balVal;
+  }, [amountIn, tokenInBalance]);
+
+  const canSwap = connected && tokenIn && tokenOut && amountIn && quote && !loading && !swapping && !insufficientBalance;
   const explorerUrl = txHash ? getExplorerTxUrl(txHash) : null;
 
   const pendingLabel = (() => {
@@ -289,14 +297,18 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
               </div>
             )}
           </div>
-          <div className="flex items-center gap-3 p-4 bg-[#171717] rounded-xl border border-[#2F2F2F] transition-all duration-200 focus-within:border-[#9E7FFF]/50">
+          <div className={`flex items-center gap-3 p-4 bg-[#171717] rounded-xl border transition-all duration-200 focus-within:border-[#9E7FFF]/50 ${
+            insufficientBalance ? 'border-[#f59e0b]/50' : 'border-[#2F2F2F]'
+          }`}>
             <input
               type="number"
               placeholder="0.0"
               value={amountIn}
               onChange={(e) => setAmountIn(e.target.value)}
               disabled={!connected}
-              className="flex-1 bg-transparent text-2xl text-[#FFFFFF] outline-none placeholder:text-[#A3A3A3] disabled:opacity-50 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              className={`flex-1 bg-transparent text-2xl outline-none placeholder:text-[#A3A3A3] disabled:opacity-50 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${
+                insufficientBalance ? 'text-[#f59e0b]' : 'text-[#FFFFFF]'
+              }`}
             />
             {/* Native side is locked, ERC-20 side is selectable */}
             {direction === 'buy' ? (
@@ -323,6 +335,16 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
               />
             )}
           </div>
+
+          {/* ── Insufficient Balance Inline Warning ── */}
+          {insufficientBalance && (
+            <div className="flex items-center gap-2 mt-1.5 px-1">
+              <AlertTriangle className="w-3.5 h-3.5 text-[#f59e0b] flex-shrink-0" />
+              <span className="text-xs font-medium text-[#f59e0b]">
+                Insufficient {tokenIn?.symbol} balance
+              </span>
+            </div>
+          )}
         </div>
 
         {/* ── Switch Button ── */}
@@ -423,8 +445,8 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
           </div>
         )}
 
-        {/* ── Error Message ── */}
-        {error && (
+        {/* ── Error Message (skip balance-related errors, handled inline) ── */}
+        {error && !insufficientBalance && (
           <div className="mt-4 p-4 bg-[#ef4444] bg-opacity-10 border border-[#ef4444] rounded-xl flex items-center gap-2">
             <AlertCircle className="w-5 h-5 text-[#ef4444] flex-shrink-0" />
             <span className="text-sm text-[#ef4444]">{error}</span>
@@ -482,6 +504,11 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
             'Select Tokens'
           ) : !amountIn ? (
             'Enter Amount'
+          ) : insufficientBalance ? (
+            <>
+              <AlertTriangle className="w-5 h-5" />
+              Insufficient {tokenIn?.symbol} Balance
+            </>
           ) : selectableTokens.length === 0 ? (
             'No Registered Tokens'
           ) : (
