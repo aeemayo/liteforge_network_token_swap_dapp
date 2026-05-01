@@ -125,6 +125,64 @@ const getWalletNetwork = async (): Promise<number | null> => {
   return normalizeChainId(chainIdHex);
 };
 
+export const switchToLiteforgeNetwork = async (): Promise<void> => {
+  const ethereum = requireEthereumProvider();
+  const chainIdHex = `0x${LITEFORGE_CHAIN_ID.toString(16)}`;
+
+  try {
+    await ethereum.request({
+      method: 'wallet_switchEthereumChain',
+      params: [{ chainId: chainIdHex }],
+    });
+  } catch (switchError: any) {
+    // 4001 is the user rejecting the request. Don't prompt to add if they rejected switching.
+    if (switchError?.code === 4001) {
+      throw new Error('User rejected network switch.');
+    }
+
+    // This error code indicates that the chain has not been added to MetaMask (4902),
+    // but some wallets might use different structures or internal error codes.
+    try {
+      await ethereum.request({
+        method: 'wallet_addEthereumChain',
+        params: [
+          {
+            chainId: chainIdHex,
+            chainName: 'LitVM LiteForge',
+            nativeCurrency: {
+              name: 'zkLTC',
+              symbol: 'zkLTC',
+              decimals: 18,
+            },
+            rpcUrls: ['https://liteforge.rpc.caldera.xyz/http'],
+            blockExplorerUrls: ['https://liteforge.explorer.caldera.xyz'],
+          },
+        ],
+      });
+    } catch (addError: any) {
+      if (addError?.code === 4001) {
+         throw new Error('User rejected adding the network.');
+      }
+      throw new Error('Failed to add Liteforge network to wallet.');
+    }
+  }
+};
+
+export const ensureCorrectNetwork = async (): Promise<void> => {
+  let chainId = await getWalletNetwork();
+  if (chainId !== LITEFORGE_CHAIN_ID) {
+    try {
+      await switchToLiteforgeNetwork();
+      chainId = await getWalletNetwork();
+      if (chainId !== LITEFORGE_CHAIN_ID) {
+        throw new Error(`Wrong network. Switch to chain ID ${LITEFORGE_CHAIN_ID}.`);
+      }
+    } catch (err) {
+      throw new Error(`Wrong network. Switch to chain ID ${LITEFORGE_CHAIN_ID}.`);
+    }
+  }
+};
+
 const getWalletAddress = async (): Promise<string | null> => {
   const ethereum = requireEthereumProvider();
   const accounts = await ethereum.request({ method: 'eth_accounts' });
@@ -156,10 +214,7 @@ export const getTokenMetadata = async (tokenAddress: string, logoUrl?: string): 
     throw new Error('Token address cannot be zero address');
   }
 
-  const chainId = await getWalletNetwork();
-  if (chainId !== LITEFORGE_CHAIN_ID) {
-    throw new Error(`Wrong network. Switch wallet network to chain ID ${LITEFORGE_CHAIN_ID}.`);
-  }
+  await ensureCorrectNetwork();
 
   const ethereum = requireEthereumProvider();
   const provider = new ethers.BrowserProvider(ethereum);
@@ -413,15 +468,13 @@ export const connectWallet = async (): Promise<WalletState> => {
     throw new Error('Wallet did not return an account.');
   }
 
+  await ensureCorrectNetwork();
   const chainId = await getWalletNetwork();
-  if (chainId !== LITEFORGE_CHAIN_ID) {
-    throw new Error(`Wrong network. Switch wallet network to chain ID ${LITEFORGE_CHAIN_ID}.`);
-  }
 
   return {
     address: accounts[0],
     chainId,
-    connected: true,
+    connected: !!accounts[0] && chainId === LITEFORGE_CHAIN_ID,
   };
 };
 
@@ -622,10 +675,7 @@ export const executeSwap = async (
     throw new Error('Invalid expected output amount');
   }
 
-  const chainId = await getWalletNetwork();
-  if (chainId !== LITEFORGE_CHAIN_ID) {
-    throw new Error(`Wrong network. Switch wallet network to chain ID ${LITEFORGE_CHAIN_ID}.`);
-  }
+  await ensureCorrectNetwork();
 
   const address = await getWalletAddress();
   if (!address) {
@@ -746,10 +796,7 @@ export const registerSupportedToken = async (
   tokenAddress: string,
   symbol: string
 ): Promise<{ txHash: string; success: boolean }> => {
-  const chainId = await getWalletNetwork();
-  if (chainId !== LITEFORGE_CHAIN_ID) {
-    throw new Error(`Wrong network. Switch to chain ID ${LITEFORGE_CHAIN_ID}.`);
-  }
+  await ensureCorrectNetwork();
 
   const ethereum = requireEthereumProvider();
   const provider = new ethers.BrowserProvider(ethereum);
@@ -787,10 +834,7 @@ export const executeAddLiquidity = async (
     throw new Error('Invalid amount for ' + tokenB.symbol);
   }
 
-  const chainId = await getWalletNetwork();
-  if (chainId !== LITEFORGE_CHAIN_ID) {
-    throw new Error(`Wrong network. Switch to chain ID ${LITEFORGE_CHAIN_ID}.`);
-  }
+  await ensureCorrectNetwork();
 
   const ethereum = requireEthereumProvider();
   const provider = new ethers.BrowserProvider(ethereum);
