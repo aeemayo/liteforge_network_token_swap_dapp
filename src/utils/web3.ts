@@ -635,8 +635,8 @@ export const getSwapQuote = async (
       const reason = errorObj.reason || errorObj.message || '';
       if (reason.includes('Token not supported')) {
         throw new Error(
-          'One or both tokens are not registered on the swap contract. ' +
-          'Use the Contract Admin panel to register them.'
+          'One or both tokens are not supported by the swap contract. ' +
+          'Import a supported token via the token selector.'
         );
       }
       throw new Error(reason || 'Contract call failed');
@@ -791,58 +791,7 @@ export const formatTokenAmount = (amount: string, decimals: number = 6): string 
   return num.toFixed(decimals);
 };
 
-// ── Admin / Owner functions ──
 
-export const isContractOwner = async (walletAddress: string): Promise<boolean> => {
-  if (!window.ethereum) return false;
-
-  try {
-    const ethereum = requireEthereumProvider();
-    const provider = new ethers.BrowserProvider(ethereum);
-    const contractAddress = getSwapContractAddress();
-    const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, provider);
-    const owner = (await swapContract.owner()) as string;
-    return owner.toLowerCase() === walletAddress.toLowerCase();
-  } catch {
-    return false;
-  }
-};
-
-export const isTokenSupported = async (tokenAddress: string): Promise<boolean> => {
-  if (!window.ethereum) return false;
-
-  try {
-    const ethereum = requireEthereumProvider();
-    const provider = new ethers.BrowserProvider(ethereum);
-    const contractAddress = getSwapContractAddress();
-    const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, provider);
-    return (await swapContract.supportedTokens(tokenAddress)) as boolean;
-  } catch {
-    return false;
-  }
-};
-
-export const registerSupportedToken = async (
-  tokenAddress: string,
-  symbol: string
-): Promise<{ txHash: string; success: boolean }> => {
-  await ensureCorrectNetwork();
-
-  const ethereum = requireEthereumProvider();
-  const provider = new ethers.BrowserProvider(ethereum);
-  const signer = await provider.getSigner();
-  const contractAddress = getSwapContractAddress();
-  const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, signer);
-
-  const tx = await swapContract.addSupportedToken(tokenAddress, symbol);
-  const receipt = await tx.wait();
-
-  if (!receipt || receipt.status !== 1) {
-    throw new Error('Token registration transaction failed');
-  }
-
-  return { txHash: tx.hash, success: true };
-};
 
 // ── Liquidity functions ──
 

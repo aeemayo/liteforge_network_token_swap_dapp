@@ -547,7 +547,7 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
         {/* ── No tokens hint ── */}
         {connected && selectableTokens.length === 0 && (
           <p className="mt-3 text-center text-xs text-[#A3A3A3]">
-            No ERC-20 tokens registered yet. Use the Contract Admin panel to register tokens.
+            No ERC-20 tokens available yet. Import a token using the token selector.
           </p>
         )}
       </div>

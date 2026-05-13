@@ -3,7 +3,6 @@ import { WalletConnect } from './components/WalletConnect';
 import { SwapInterface } from './components/SwapInterface';
 import { LiquidityPool } from './components/LiquidityPool';
 import { AddLiquidity } from './components/AddLiquidity';
-import { TokenAdmin } from './components/TokenAdmin';
 import { useWallet } from './hooks/useWallet';
 import { useTokens } from './hooks/useTokens';
 import { useAnalytics, formatStatValue } from './hooks/useAnalytics';
@@ -183,13 +182,6 @@ function App() {
           </div>
         </div>
 
-        {/* Token Admin (only visible to contract owner) */}
-        <div className="flex justify-center mb-4">
-          <TokenAdmin
-            connected={wallet.connected}
-            walletAddress={wallet.address}
-          />
-        </div>
 
         {/* Swap Interface */}
         <div id="swap" className="flex justify-center mb-12">
