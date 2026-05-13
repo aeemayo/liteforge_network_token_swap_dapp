@@ -11,6 +11,8 @@ interface IERC20 {
  * @title LiteforgeSwap
  * @notice Decentralized exchange for swapping tokens on the Liteforge network
  * @dev Implements automated market maker (AMM) with constant product formula (x * y = k)
+ *      AND fixed-rate swaps for zkLTC pairs. When a fixed rate is configured for a token,
+ *      all swaps between that token and zkLTC use the fixed rate instead of the AMM formula.
  *      Supports native zkLTC swaps via a sentinel address.
  */
 contract LiteforgeSwap {
@@ -31,6 +33,16 @@ contract LiteforgeSwap {
     // Supported tokens
     mapping(address => bool) public supportedTokens;
     address[] public tokenList;
+
+    // ── Fixed-rate configuration for zkLTC pairs ────────────────────
+    // fixedRate[token] = how many zkLTC wei per 1 full token (scaled to 18 decimals).
+    // A rate of 0 means no fixed rate is set → fall back to AMM.
+    // Example: if 1 TOKEN = 0.5 zkLTC, set fixedRate[token] = 0.5e18 = 500000000000000000
+    mapping(address => uint256) public fixedRate;
+
+    // Track which tokens have fixed rates for enumeration
+    address[] public fixedRateTokens;
+    mapping(address => bool) public hasFixedRate;
     
     // Events
     event Swap(
@@ -62,6 +74,8 @@ contract LiteforgeSwap {
     
     event TokenAdded(address indexed token, string symbol);
     event FeeUpdated(uint256 oldFee, uint256 newFee);
+    event FixedRateSet(address indexed token, uint256 rate);
+    event FixedRateRemoved(address indexed token);
     
     // Modifiers
     modifier onlyOwner() {
@@ -130,6 +144,44 @@ contract LiteforgeSwap {
         }
     }
 
+    // ── Fixed-rate helpers ──────────────────────────────────────────
+
+    /**
+     * @dev Returns true if this swap pair involves native zkLTC on one side
+     *      and must use fixed-rate pricing (rate must be configured).
+     */
+    function _isFixedRatePair(address tokenIn, address tokenOut) internal view returns (bool) {
+        return _isNative(tokenIn) || _isNative(tokenOut);
+    }
+
+    /**
+     * @dev Compute a fixed-rate swap output.
+     *      fixedRate[token] = zkLTC wei per 1e18 token wei.
+     *
+     *      - Buying token with zkLTC:  amountOut = amountInAfterFee * 1e18 / rate
+     *      - Selling token for zkLTC:  amountOut = amountInAfterFee * rate / 1e18
+     */
+    function _computeFixedRateOutput(
+        address tokenIn,
+        address tokenOut,
+        uint256 amountIn
+    ) internal view returns (uint256 amountOut, uint256 fee) {
+        fee = (amountIn * feePercentage) / 10000;
+        uint256 amountInAfterFee = amountIn - fee;
+
+        if (_isNative(tokenIn)) {
+            // zkLTC → Token: user sends zkLTC, receives token
+            uint256 rate = fixedRate[tokenOut]; // zkLTC per 1 token
+            require(rate > 0, "No fixed rate for this token");
+            amountOut = (amountInAfterFee * 1e18) / rate;
+        } else {
+            // Token → zkLTC: user sends token, receives zkLTC
+            uint256 rate = fixedRate[tokenIn]; // zkLTC per 1 token
+            require(rate > 0, "No fixed rate for this token");
+            amountOut = (amountInAfterFee * rate) / 1e18;
+        }
+    }
+
     // ── Token management ────────────────────────────────────────────
 
     /**
@@ -153,6 +205,91 @@ contract LiteforgeSwap {
      */
     function getSupportedTokens() external view returns (address[] memory) {
         return tokenList;
+    }
+
+    // ── Fixed-rate management ───────────────────────────────────────
+
+    /**
+     * @notice Set a fixed exchange rate for a token's zkLTC pair.
+     * @param token  The ERC-20 token address (NOT the native token sentinel).
+     * @param rate   zkLTC wei per 1 full token (1e18 units of the token).
+     *               For example: 1 TOKEN = 2 zkLTC → rate = 2e18 = 2000000000000000000.
+     *               Set to 0 to remove the fixed rate (reverts to AMM).
+     */
+    function setFixedRate(address token, uint256 rate) external onlyOwner {
+        require(token != address(0) && token != NATIVE_TOKEN, "Cannot set rate for native token");
+        require(supportedTokens[token], "Token not supported");
+
+        if (rate == 0) {
+            // Remove fixed rate
+            fixedRate[token] = 0;
+            if (hasFixedRate[token]) {
+                hasFixedRate[token] = false;
+                _removeFromFixedRateList(token);
+            }
+            emit FixedRateRemoved(token);
+        } else {
+            fixedRate[token] = rate;
+            if (!hasFixedRate[token]) {
+                hasFixedRate[token] = true;
+                fixedRateTokens.push(token);
+            }
+            emit FixedRateSet(token, rate);
+        }
+    }
+
+    /**
+     * @notice Batch-set fixed rates for multiple tokens at once.
+     * @param tokens Array of ERC-20 token addresses.
+     * @param rates  Array of rates (zkLTC wei per 1e18 token).
+     */
+    function setFixedRateBatch(address[] calldata tokens, uint256[] calldata rates) external onlyOwner {
+        require(tokens.length == rates.length, "Array length mismatch");
+        for (uint256 i = 0; i < tokens.length; i++) {
+            require(tokens[i] != address(0) && tokens[i] != NATIVE_TOKEN, "Cannot set rate for native token");
+            require(supportedTokens[tokens[i]], "Token not supported");
+
+            if (rates[i] == 0) {
+                fixedRate[tokens[i]] = 0;
+                if (hasFixedRate[tokens[i]]) {
+                    hasFixedRate[tokens[i]] = false;
+                    _removeFromFixedRateList(tokens[i]);
+                }
+                emit FixedRateRemoved(tokens[i]);
+            } else {
+                fixedRate[tokens[i]] = rates[i];
+                if (!hasFixedRate[tokens[i]]) {
+                    hasFixedRate[tokens[i]] = true;
+                    fixedRateTokens.push(tokens[i]);
+                }
+                emit FixedRateSet(tokens[i], rates[i]);
+            }
+        }
+    }
+
+    /**
+     * @notice Get the fixed rate for a token (0 = no fixed rate / AMM mode).
+     */
+    function getFixedRate(address token) external view returns (uint256) {
+        return fixedRate[token];
+    }
+
+    /**
+     * @notice Get all tokens that currently have a fixed rate configured.
+     */
+    function getFixedRateTokens() external view returns (address[] memory) {
+        return fixedRateTokens;
+    }
+
+    function _removeFromFixedRateList(address token) internal {
+        uint256 len = fixedRateTokens.length;
+        for (uint256 i = 0; i < len; i++) {
+            if (fixedRateTokens[i] == token) {
+                fixedRateTokens[i] = fixedRateTokens[len - 1];
+                fixedRateTokens.pop();
+                break;
+            }
+        }
     }
     
     // ── Liquidity ───────────────────────────────────────────────────
@@ -262,7 +399,8 @@ contract LiteforgeSwap {
     // ── Swap ────────────────────────────────────────────────────────
 
     /**
-     * @notice Swap tokens using constant product formula
+     * @notice Swap tokens. If the pair has a fixed rate with zkLTC, uses the fixed rate.
+     *         Otherwise falls back to constant product AMM formula.
      * @dev If tokenIn is native, send the exact amount as msg.value.
      *      If tokenIn is ERC-20, msg.value must be 0.
      */
@@ -283,24 +421,41 @@ contract LiteforgeSwap {
         }
         
         uint256 receivedIn = _pullTokensAndGetReceived(tokenIn, msg.sender, amountIn);
-        
-        uint256 reserveIn = reserves[tokenIn][tokenOut];
-        uint256 reserveOut = reserves[tokenOut][tokenIn];
-        
-        require(reserveIn > 0 && reserveOut > 0, "Insufficient liquidity");
-        
-        uint256 amountInWithFee = receivedIn * (10000 - feePercentage);
-        uint256 fee = (receivedIn * feePercentage) / 10000;
-        
-        amountOut = (amountInWithFee * reserveOut) / (reserveIn * 10000 + amountInWithFee);
-        
-        require(amountOut > 0, "Insufficient output amount");
-        require(amountOut < reserveOut, "Insufficient liquidity for swap");
-        require(amountOut >= minAmountOut, "Slippage exceeded");
+        uint256 fee;
 
-        // CEI: Update reserves before pushing output
-        reserves[tokenIn][tokenOut] += receivedIn;
-        reserves[tokenOut][tokenIn] -= amountOut;
+        if (_isFixedRatePair(tokenIn, tokenOut)) {
+            // ── Fixed-rate swap ──
+            (amountOut, fee) = _computeFixedRateOutput(tokenIn, tokenOut, receivedIn);
+
+            require(amountOut > 0, "Insufficient output amount");
+            require(amountOut >= minAmountOut, "Slippage exceeded");
+
+            // For fixed-rate swaps, ensure the contract holds enough of the output token
+            if (_isNative(tokenOut)) {
+                require(address(this).balance >= amountOut, "Insufficient contract zkLTC balance for fixed-rate swap");
+            } else {
+                require(IERC20(tokenOut).balanceOf(address(this)) >= amountOut, "Insufficient contract token balance for fixed-rate swap");
+            }
+        } else {
+            // ── AMM swap (constant product) ──
+            uint256 reserveIn = reserves[tokenIn][tokenOut];
+            uint256 reserveOut = reserves[tokenOut][tokenIn];
+            
+            require(reserveIn > 0 && reserveOut > 0, "Insufficient liquidity");
+            
+            uint256 amountInWithFee = receivedIn * (10000 - feePercentage);
+            fee = (receivedIn * feePercentage) / 10000;
+            
+            amountOut = (amountInWithFee * reserveOut) / (reserveIn * 10000 + amountInWithFee);
+            
+            require(amountOut > 0, "Insufficient output amount");
+            require(amountOut < reserveOut, "Insufficient liquidity for swap");
+            require(amountOut >= minAmountOut, "Slippage exceeded");
+
+            // CEI: Update reserves before pushing output
+            reserves[tokenIn][tokenOut] += receivedIn;
+            reserves[tokenOut][tokenIn] -= amountOut;
+        }
 
         // Push output
         _pushTokens(tokenOut, msg.sender, amountOut);
@@ -311,7 +466,8 @@ contract LiteforgeSwap {
     // ── Quotes & views ──────────────────────────────────────────────
 
     /**
-     * @notice Get quote for swap (pure read — no msg.value needed)
+     * @notice Get quote for swap (pure read — no msg.value needed).
+     *         Uses fixed rate for zkLTC pairs when configured.
      */
     function getSwapQuote(
         address tokenIn,
@@ -320,17 +476,28 @@ contract LiteforgeSwap {
     ) external view returns (uint256 amountOut, uint256 fee) {
         require(supportedTokens[tokenIn] && supportedTokens[tokenOut], "Token not supported");
         require(amountIn > 0, "Amount must be greater than 0");
-        
-        uint256 reserveIn = reserves[tokenIn][tokenOut];
-        uint256 reserveOut = reserves[tokenOut][tokenIn];
-        
-        if (reserveIn == 0 || reserveOut == 0) {
-            return (0, 0);
+
+        if (_isFixedRatePair(tokenIn, tokenOut)) {
+            (amountOut, fee) = _computeFixedRateOutput(tokenIn, tokenOut, amountIn);
+        } else {
+            uint256 reserveIn = reserves[tokenIn][tokenOut];
+            uint256 reserveOut = reserves[tokenOut][tokenIn];
+            
+            if (reserveIn == 0 || reserveOut == 0) {
+                return (0, 0);
+            }
+            
+            fee = amountIn * feePercentage / 10000;
+            uint256 amountInWithFee = amountIn * (10000 - feePercentage);
+            amountOut = (amountInWithFee * reserveOut) / (reserveIn * 10000 + amountInWithFee);
         }
-        
-        fee = amountIn * feePercentage / 10000;
-        uint256 amountInWithFee = amountIn * (10000 - feePercentage);
-        amountOut = (amountInWithFee * reserveOut) / (reserveIn * 10000 + amountInWithFee);
+    }
+
+    /**
+     * @notice Check if a pair uses fixed-rate pricing.
+     */
+    function isFixedRatePair(address tokenIn, address tokenOut) external view returns (bool) {
+        return _isFixedRatePair(tokenIn, tokenOut);
     }
     
     /**
@@ -356,6 +523,23 @@ contract LiteforgeSwap {
         uint256 oldFee = feePercentage;
         feePercentage = newFee;
         emit FeeUpdated(oldFee, newFee);
+    }
+
+    /**
+     * @notice Owner can deposit native zkLTC to fund fixed-rate swaps
+     */
+    function depositNative() external payable onlyOwner {
+        require(msg.value > 0, "Must send zkLTC");
+    }
+
+    /**
+     * @notice Owner can withdraw native zkLTC (only surplus, not AMM reserves)
+     */
+    function withdrawNative(uint256 amount) external onlyOwner nonReentrant {
+        require(amount > 0, "Amount must be > 0");
+        require(address(this).balance >= amount, "Insufficient balance");
+        (bool sent, ) = payable(owner).call{value: amount}("");
+        require(sent, "Transfer failed");
     }
     
     /**

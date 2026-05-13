@@ -12,6 +12,7 @@ export interface SwapQuote {
   fee: string;
   priceImpact: string;
   minimumReceived: string;
+  isFixedRate: boolean;
 }
 
 export type SwapExecutionStatus = 'checking-allowance' | 'approving' | 'swapping';
@@ -54,9 +55,20 @@ export const SWAP_CONTRACT_ABI = [
   'function addSupportedToken(address token, string symbol)',
   'function owner() view returns (address)',
   'function totalLiquidity(address, address) view returns (uint256)',
+  // Fixed-rate functions
+  'function setFixedRate(address token, uint256 rate)',
+  'function setFixedRateBatch(address[] tokens, uint256[] rates)',
+  'function getFixedRate(address token) view returns (uint256)',
+  'function getFixedRateTokens() view returns (address[])',
+  'function isFixedRatePair(address tokenIn, address tokenOut) view returns (bool)',
+  'function depositNative() payable',
+  'function withdrawNative(uint256 amount)',
+  // Events
   'event Swap(address indexed user, address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut, uint256 fee)',
   'event LiquidityAdded(address indexed provider, address indexed tokenA, address indexed tokenB, uint256 amountA, uint256 amountB, uint256 liquidity)',
   'event LiquidityRemoved(address indexed provider, address indexed tokenA, address indexed tokenB, uint256 amountA, uint256 amountB, uint256 liquidity)',
+  'event FixedRateSet(address indexed token, uint256 rate)',
+  'event FixedRateRemoved(address indexed token)',
 ] as const;
 
 const ERC20_ABI = [
@@ -560,6 +572,59 @@ export const getTokenBalance = async (
   return ethers.formatUnits(balanceWei, tokenDecimals);
 };
 
+// ── Fixed-rate helpers ────────────────────────────────────────────
+
+export const checkIsFixedRatePair = async (
+  tokenIn: Token,
+  tokenOut: Token,
+): Promise<boolean> => {
+  if (!window.ethereum) return false;
+  try {
+    const ethereum = requireEthereumProvider();
+    const provider = new ethers.BrowserProvider(ethereum);
+    const contractAddress = getSwapContractAddress();
+    const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, provider);
+    return (await swapContract.isFixedRatePair(tokenIn.address, tokenOut.address)) as boolean;
+  } catch {
+    return false;
+  }
+};
+
+export const getFixedRateForToken = async (
+  tokenAddress: string,
+): Promise<string> => {
+  const ethereum = requireEthereumProvider();
+  const provider = new ethers.BrowserProvider(ethereum);
+  const contractAddress = getSwapContractAddress();
+  const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, provider);
+  const rate = (await swapContract.getFixedRate(tokenAddress)) as bigint;
+  return ethers.formatUnits(rate, 18);
+};
+
+export const setFixedRateForToken = async (
+  tokenAddress: string,
+  rateInZkltc: string,
+): Promise<{ txHash: string; success: boolean }> => {
+  await ensureCorrectNetwork();
+  const ethereum = requireEthereumProvider();
+  const provider = new ethers.BrowserProvider(ethereum);
+  const signer = await provider.getSigner();
+  const contractAddress = getSwapContractAddress();
+  const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, signer);
+
+  const rateWei = ethers.parseUnits(rateInZkltc, 18);
+  const tx = await swapContract.setFixedRate(tokenAddress, rateWei);
+  const receipt = await tx.wait();
+
+  if (!receipt || receipt.status !== 1) {
+    throw new Error('Set fixed rate transaction failed');
+  }
+
+  return { txHash: tx.hash, success: true };
+};
+
+// ── Swap quote ──────────────────────────────────────────────────
+
 export const getSwapQuote = async (
   tokenIn: Token,
   tokenOut: Token,
@@ -586,6 +651,14 @@ export const getSwapQuote = async (
 
   const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, provider);
 
+  // Check if this is a fixed-rate pair
+  let isFixedRate = false;
+  try {
+    isFixedRate = (await swapContract.isFixedRatePair(tokenIn.address, tokenOut.address)) as boolean;
+  } catch {
+    // Contract may not support this function (old deployment) — assume AMM
+  }
+
   let amountOutWei: bigint;
   let feeWei: bigint;
 
@@ -604,6 +677,11 @@ export const getSwapQuote = async (
 
     if (errorObj.code === 'CALL_EXCEPTION') {
       const reason = errorObj.reason || errorObj.message || '';
+      if (reason.includes('No fixed rate for this token')) {
+        throw new Error(
+          'Fixed rate not set for this zkLTC pair. Ask the contract owner to set a rate first.'
+        );
+      }
       if (reason.includes('Token not supported')) {
         throw new Error(
           'One or both tokens are not registered on the swap contract. ' +
@@ -618,36 +696,46 @@ export const getSwapQuote = async (
 
   if (amountOutWei <= 0n) {
     throw new Error(
-      'No liquidity available for this pair. Add liquidity to the ' +
-      `${tokenIn.symbol}/${tokenOut.symbol} pool before swapping.`
+      isFixedRate
+        ? 'Insufficient contract balance for this fixed-rate swap.'
+        : 'No liquidity available for this pair. Add liquidity to the ' +
+          `${tokenIn.symbol}/${tokenOut.symbol} pool before swapping.`
     );
-  }
-
-  let reserveInWei = 0n;
-  let reserveOutWei = 0n;
-  try {
-    [reserveInWei, reserveOutWei] = await swapContract.getReserves(tokenIn.address, tokenOut.address) as [bigint, bigint];
-  } catch {
-    // Non-critical — price impact will just show 0
   }
 
   const amountOut = toDisplayAmount(amountOutWei, tokenOut.decimals);
   const fee = toDisplayAmount(feeWei, tokenIn.decimals);
 
   let priceImpact = '0.00';
-  if (reserveInWei > 0n && reserveOutWei > 0n && amountInNum > 0) {
-    const reserveIn = Number.parseFloat(ethers.formatUnits(reserveInWei, tokenIn.decimals));
-    const reserveOut = Number.parseFloat(ethers.formatUnits(reserveOutWei, tokenOut.decimals));
-    const spotPrice = reserveOut / reserveIn;
-    const executionPrice = Number.parseFloat(amountOut) / amountInNum;
 
-    if (Number.isFinite(spotPrice) && spotPrice > 0 && Number.isFinite(executionPrice)) {
-      const impact = Math.max(0, ((spotPrice - executionPrice) / spotPrice) * 100);
-      priceImpact = impact.toFixed(2);
+  // Fixed-rate pairs have zero price impact by definition
+  if (!isFixedRate) {
+    let reserveInWei = 0n;
+    let reserveOutWei = 0n;
+    try {
+      [reserveInWei, reserveOutWei] = await swapContract.getReserves(tokenIn.address, tokenOut.address) as [bigint, bigint];
+    } catch {
+      // Non-critical — price impact will just show 0
+    }
+
+    if (reserveInWei > 0n && reserveOutWei > 0n && amountInNum > 0) {
+      const reserveIn = Number.parseFloat(ethers.formatUnits(reserveInWei, tokenIn.decimals));
+      const reserveOut = Number.parseFloat(ethers.formatUnits(reserveOutWei, tokenOut.decimals));
+      const spotPrice = reserveOut / reserveIn;
+      const executionPrice = Number.parseFloat(amountOut) / amountInNum;
+
+      if (Number.isFinite(spotPrice) && spotPrice > 0 && Number.isFinite(executionPrice)) {
+        const impact = Math.max(0, ((spotPrice - executionPrice) / spotPrice) * 100);
+        priceImpact = impact.toFixed(2);
+      }
     }
   }
 
-  const minimumReceivedWei = (amountOutWei * BigInt(10000 - slippageBps)) / 10000n;
+  // For fixed-rate swaps, minimum received = exact output (no slippage).
+  // We still apply slippage tolerance as a safety margin for the on-chain tx.
+  const minimumReceivedWei = isFixedRate
+    ? amountOutWei  // Fixed rate: exact output guaranteed
+    : (amountOutWei * BigInt(10000 - slippageBps)) / 10000n;
   const minimumReceived = toDisplayAmount(minimumReceivedWei, tokenOut.decimals);
   
   return {
@@ -655,6 +743,7 @@ export const getSwapQuote = async (
     fee,
     priceImpact,
     minimumReceived,
+    isFixedRate,
   };
 };
 
