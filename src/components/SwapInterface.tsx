@@ -417,14 +417,7 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
         {quote && !loading && (
           <div className="mt-4 p-4 bg-[#171717] rounded-xl border border-[#2F2F2F] space-y-2">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-[#A3A3A3] flex items-center gap-1.5">
-                Rate
-                {quote.isFixedRate && (
-                  <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-[#10b981]/20 text-[#10b981] uppercase tracking-wide">
-                    Fixed
-                  </span>
-                )}
-              </span>
+              <span className="text-[#A3A3A3]">Rate</span>
               <span className="text-[#FFFFFF] font-mono">
                 1 {tokenIn?.symbol} = {(parseFloat(quote.amountOut) / parseFloat(amountIn)).toFixed(6)} {tokenOut?.symbol}
               </span>
@@ -436,26 +429,15 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
               </span>
               <span className="text-[#FFFFFF] font-mono">{quote.fee} {tokenIn?.symbol}</span>
             </div>
-            {!quote.isFixedRate && (
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-[#A3A3A3] flex items-center gap-1">
-                  <TrendingUp className="w-3 h-3" />
-                  Price Impact
-                </span>
-                <span className={`font-mono ${parseFloat(quote.priceImpact) > 1 ? 'text-[#f59e0b]' : 'text-[#10b981]'}`}>
-                  {quote.priceImpact}%
-                </span>
-              </div>
-            )}
-            {quote.isFixedRate && (
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-[#A3A3A3] flex items-center gap-1">
-                  <TrendingUp className="w-3 h-3" />
-                  Price Impact
-                </span>
-                <span className="text-[#10b981] font-mono">None (Fixed Rate)</span>
-              </div>
-            )}
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-[#A3A3A3] flex items-center gap-1">
+                <TrendingUp className="w-3 h-3" />
+                Price Impact
+              </span>
+              <span className={`font-mono ${parseFloat(quote.priceImpact) > 1 ? 'text-[#f59e0b]' : 'text-[#10b981]'}`}>
+                {quote.priceImpact}%
+              </span>
+            </div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-[#A3A3A3]">Minimum Received</span>
               <span className="text-[#FFFFFF] font-mono">{quote.minimumReceived} {tokenOut?.symbol}</span>

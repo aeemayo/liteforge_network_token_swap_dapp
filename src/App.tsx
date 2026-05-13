@@ -188,7 +188,6 @@ function App() {
           <TokenAdmin
             connected={wallet.connected}
             walletAddress={wallet.address}
-            tokens={availableTokens}
           />
         </div>
 

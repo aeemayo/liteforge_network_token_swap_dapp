@@ -12,7 +12,6 @@ export interface SwapQuote {
   fee: string;
   priceImpact: string;
   minimumReceived: string;
-  isFixedRate?: boolean;
 }
 
 export type SwapExecutionStatus = 'checking-allowance' | 'approving' | 'swapping';
@@ -55,13 +54,9 @@ export const SWAP_CONTRACT_ABI = [
   'function addSupportedToken(address token, string symbol)',
   'function owner() view returns (address)',
   'function totalLiquidity(address, address) view returns (uint256)',
-  'function setFixedRate(address token, uint256 rate)',
-  'function getFixedRate(address token) view returns (uint256)',
-  'function fixedRates(address) view returns (uint256)',
   'event Swap(address indexed user, address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut, uint256 fee)',
   'event LiquidityAdded(address indexed provider, address indexed tokenA, address indexed tokenB, uint256 amountA, uint256 amountB, uint256 liquidity)',
   'event LiquidityRemoved(address indexed provider, address indexed tokenA, address indexed tokenB, uint256 amountA, uint256 amountB, uint256 liquidity)',
-  'event FixedRateSet(address indexed token, uint256 rate)',
 ] as const;
 
 const ERC20_ABI = [
@@ -628,46 +623,27 @@ export const getSwapQuote = async (
     );
   }
 
-  // Detect if a fixed rate is active for this pair
-  let isFixedRate = false;
-  const isTokenInNative = tokenIn.isNative || tokenIn.address.toLowerCase() === NATIVE_ZKLTC_PLACEHOLDER_ADDRESS.toLowerCase();
-  const isTokenOutNative = tokenOut.isNative || tokenOut.address.toLowerCase() === NATIVE_ZKLTC_PLACEHOLDER_ADDRESS.toLowerCase();
-
-  if (isTokenInNative !== isTokenOutNative) {
-    // One side is native — check fixed rate for the non-native token
-    const pairTokenAddress = isTokenInNative ? tokenOut.address : tokenIn.address;
-    try {
-      const fixedRate = await swapContract.getFixedRate(pairTokenAddress) as bigint;
-      isFixedRate = fixedRate > 0n;
-    } catch {
-      // Contract may not have getFixedRate — treat as AMM
-    }
+  let reserveInWei = 0n;
+  let reserveOutWei = 0n;
+  try {
+    [reserveInWei, reserveOutWei] = await swapContract.getReserves(tokenIn.address, tokenOut.address) as [bigint, bigint];
+  } catch {
+    // Non-critical — price impact will just show 0
   }
 
   const amountOut = toDisplayAmount(amountOutWei, tokenOut.decimals);
   const fee = toDisplayAmount(feeWei, tokenIn.decimals);
 
   let priceImpact = '0.00';
-  if (!isFixedRate) {
-    // Only compute price impact for AMM swaps
-    let reserveInWei = 0n;
-    let reserveOutWei = 0n;
-    try {
-      [reserveInWei, reserveOutWei] = await swapContract.getReserves(tokenIn.address, tokenOut.address) as [bigint, bigint];
-    } catch {
-      // Non-critical — price impact will just show 0
-    }
+  if (reserveInWei > 0n && reserveOutWei > 0n && amountInNum > 0) {
+    const reserveIn = Number.parseFloat(ethers.formatUnits(reserveInWei, tokenIn.decimals));
+    const reserveOut = Number.parseFloat(ethers.formatUnits(reserveOutWei, tokenOut.decimals));
+    const spotPrice = reserveOut / reserveIn;
+    const executionPrice = Number.parseFloat(amountOut) / amountInNum;
 
-    if (reserveInWei > 0n && reserveOutWei > 0n && amountInNum > 0) {
-      const reserveIn = Number.parseFloat(ethers.formatUnits(reserveInWei, tokenIn.decimals));
-      const reserveOut = Number.parseFloat(ethers.formatUnits(reserveOutWei, tokenOut.decimals));
-      const spotPrice = reserveOut / reserveIn;
-      const executionPrice = Number.parseFloat(amountOut) / amountInNum;
-
-      if (Number.isFinite(spotPrice) && spotPrice > 0 && Number.isFinite(executionPrice)) {
-        const impact = Math.max(0, ((spotPrice - executionPrice) / spotPrice) * 100);
-        priceImpact = impact.toFixed(2);
-      }
+    if (Number.isFinite(spotPrice) && spotPrice > 0 && Number.isFinite(executionPrice)) {
+      const impact = Math.max(0, ((spotPrice - executionPrice) / spotPrice) * 100);
+      priceImpact = impact.toFixed(2);
     }
   }
 
@@ -679,7 +655,6 @@ export const getSwapQuote = async (
     fee,
     priceImpact,
     minimumReceived,
-    isFixedRate,
   };
 };
 
@@ -922,64 +897,4 @@ export const executeAddLiquidity = async (
   }
 
   return { txHash: tx.hash, success: true };
-};
-
-// ── Fixed-rate management ──
-
-/**
- * Set a fixed exchange rate for a token paired with zkLTC.
- * @param tokenAddress  The ERC-20 token address.
- * @param rate          Human-readable rate, e.g. "2.5" means 1 zkLTC = 2.5 tokens.
- *                      Pass "0" to remove the fixed rate and revert to AMM.
- */
-export const setFixedRate = async (
-  tokenAddress: string,
-  rate: string
-): Promise<{ txHash: string; success: boolean }> => {
-  await ensureCorrectNetwork();
-
-  const rateNum = Number.parseFloat(rate);
-  if (!Number.isFinite(rateNum) || rateNum < 0) {
-    throw new Error('Invalid rate');
-  }
-
-  const ethereum = requireEthereumProvider();
-  const provider = new ethers.BrowserProvider(ethereum);
-  const signer = await provider.getSigner();
-  const contractAddress = getSwapContractAddress();
-  const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, signer);
-
-  // Convert human-readable rate to 18-decimal on-chain representation
-  const rateWei = ethers.parseUnits(rate, 18);
-
-  const tx = await swapContract.setFixedRate(tokenAddress, rateWei);
-  const receipt = await tx.wait();
-
-  if (!receipt || receipt.status !== 1) {
-    throw new Error('Set fixed rate transaction failed');
-  }
-
-  return { txHash: tx.hash, success: true };
-};
-
-/**
- * Read the current fixed rate for a token paired with zkLTC.
- * Returns the human-readable rate (e.g. "2.5") or "0" if no fixed rate is set.
- */
-export const getFixedRate = async (tokenAddress: string): Promise<string> => {
-  if (!window.ethereum) return '0';
-
-  try {
-    const ethereum = requireEthereumProvider();
-    const provider = new ethers.BrowserProvider(ethereum);
-    const contractAddress = getSwapContractAddress();
-    const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, provider);
-
-    const rateWei = await swapContract.getFixedRate(tokenAddress) as bigint;
-    if (rateWei === 0n) return '0';
-
-    return ethers.formatUnits(rateWei, 18);
-  } catch {
-    return '0';
-  }
 };
