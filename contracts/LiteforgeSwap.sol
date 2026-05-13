@@ -148,10 +148,12 @@ contract LiteforgeSwap {
 
     /**
      * @dev Returns true if this swap pair involves native zkLTC on one side
-     *      and must use fixed-rate pricing (rate must be configured).
+     *      and a token with a fixed rate on the other side.
      */
     function _isFixedRatePair(address tokenIn, address tokenOut) internal view returns (bool) {
-        return _isNative(tokenIn) || _isNative(tokenOut);
+        if (_isNative(tokenIn) && fixedRate[tokenOut] > 0) return true;
+        if (_isNative(tokenOut) && fixedRate[tokenIn] > 0) return true;
+        return false;
     }
 
     /**
