@@ -225,7 +225,9 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
             Sell Token
           </button>
           <button
+            type="button"
             onClick={() => setShowSettings(!showSettings)}
+            aria-label={showSettings ? 'Close settings' : 'Open settings'}
             className="p-2.5 rounded-xl text-[#A3A3A3] hover:text-[#FFFFFF] bg-[#171717] border border-[#2F2F2F] hover:border-[#9E7FFF]/30 transition-all duration-300"
           >
             <Settings className="w-5 h-5" />
@@ -350,7 +352,10 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
         {/* ── Switch Button ── */}
         <div className="flex justify-center -my-2 relative z-10">
           <button
+            type="button"
             onClick={() => handleDirectionChange(direction === 'buy' ? 'sell' : 'buy')}
+            aria-label="Switch swap direction"
+            title="Switch swap direction"
             className="group p-3 bg-[#262626] hover:bg-[#2F2F2F] rounded-xl border-4 border-[#171717] transition-all duration-300 hover:scale-110 hover:rotate-180"
           >
             <ArrowDownUp className={`w-5 h-5 transition-colors duration-300 ${direction === 'buy' ? 'text-[#9E7FFF]' : 'text-[#f472b6]'}`} />
