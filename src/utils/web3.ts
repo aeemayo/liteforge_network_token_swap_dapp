@@ -810,7 +810,14 @@ const ensureTokensRegistered = async (
   const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, signer);
 
   for (const token of tokens) {
-    const isSupported = await swapContract.supportedTokens(token.address) as boolean;
+    // Check if already supported — if the view call fails, assume not supported
+    let isSupported = false;
+    try {
+      isSupported = await swapContract.supportedTokens(token.address) as boolean;
+    } catch {
+      // View call failed (RPC issue, missing code, etc.) — proceed to try registration
+      isSupported = false;
+    }
     if (isSupported) continue;
 
     // Attempt auto-registration — will revert if the signer is not the owner
@@ -828,6 +835,10 @@ const ensureTokensRegistered = async (
           `${token.symbol} is not registered on the swap contract and your wallet is not the contract owner. ` +
           'Ask the contract owner to register this token.'
         );
+      }
+      // "Token already supported" means it was registered between our check and now — safe to continue
+      if (reason.includes('already supported')) {
+        continue;
       }
       throw err;
     }
