@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import { Token } from './tokens';
+import { computeFixedRateQuote, hasFixedRate } from './fixedRates';
 
 export interface WalletState {
   address: string | null;
@@ -12,6 +13,8 @@ export interface SwapQuote {
   fee: string;
   priceImpact: string;
   minimumReceived: string;
+  /** True when the quote was derived from a fixed rate rather than the on-chain AMM */
+  isFixedRate: boolean;
 }
 
 export type SwapExecutionStatus = 'checking-allowance' | 'approving' | 'swapping';
@@ -571,6 +574,32 @@ export const getSwapQuote = async (
     throw new Error('Invalid input amount');
   }
 
+  // ── Fixed-rate path: deterministic client-side pricing ──
+  if (hasFixedRate(tokenIn.address, tokenOut.address)) {
+    const fixedQuote = computeFixedRateQuote(
+      tokenIn.address,
+      tokenOut.address,
+      amountIn,
+      30, // 0.30% fee
+    );
+
+    if (!fixedQuote) {
+      throw new Error('Invalid input amount');
+    }
+
+    const amountOutNum = parseFloat(fixedQuote.amountOut);
+    const minimumReceivedNum = amountOutNum * (1 - slippageBps / 10_000);
+
+    return {
+      amountOut: fixedQuote.amountOut,
+      fee: fixedQuote.fee,
+      priceImpact: '0.00', // Fixed rate → no price impact
+      minimumReceived: minimumReceivedNum.toFixed(6),
+      isFixedRate: true,
+    };
+  }
+
+  // ── AMM path: on-chain quote from the swap contract ──
   const ethereum = requireEthereumProvider();
   const provider = new ethers.BrowserProvider(ethereum);
   const contractAddress = getSwapContractAddress();
@@ -655,6 +684,7 @@ export const getSwapQuote = async (
     fee,
     priceImpact,
     minimumReceived,
+    isFixedRate: false,
   };
 };
 

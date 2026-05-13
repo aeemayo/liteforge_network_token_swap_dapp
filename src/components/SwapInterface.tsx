@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowDownUp, Loader2, AlertCircle, CheckCircle2, TrendingUp, Zap, Coins, Wallet, Settings, AlertTriangle } from 'lucide-react';
+import { ArrowDownUp, Loader2, AlertCircle, CheckCircle2, TrendingUp, Zap, Coins, Wallet, Settings, AlertTriangle, Lock } from 'lucide-react';
 import { TokenSelector } from './TokenSelector';
 import { useSwap } from '../hooks/useSwap';
 import { formatTokenAmount, getExplorerTxUrl, getTokenBalance } from '../utils/web3';
@@ -416,8 +416,17 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
         {/* ── Quote Details ── */}
         {quote && !loading && (
           <div className="mt-4 p-4 bg-[#171717] rounded-xl border border-[#2F2F2F] space-y-2">
+            {quote.isFixedRate && (
+              <div className="flex items-center justify-center gap-2 mb-2 py-1.5 px-3 bg-[#10b981]/10 rounded-lg border border-[#10b981]/20">
+                <Lock className="w-3.5 h-3.5 text-[#10b981]" />
+                <span className="text-xs font-semibold text-[#10b981] tracking-wide uppercase">Fixed Rate — No Price Impact</span>
+              </div>
+            )}
             <div className="flex items-center justify-between text-sm">
-              <span className="text-[#A3A3A3]">Rate</span>
+              <span className="text-[#A3A3A3] flex items-center gap-1">
+                {quote.isFixedRate && <Lock className="w-3 h-3 text-[#10b981]" />}
+                Rate
+              </span>
               <span className="text-[#FFFFFF] font-mono">
                 1 {tokenIn?.symbol} = {(parseFloat(quote.amountOut) / parseFloat(amountIn)).toFixed(6)} {tokenOut?.symbol}
               </span>
@@ -434,9 +443,16 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
                 <TrendingUp className="w-3 h-3" />
                 Price Impact
               </span>
-              <span className={`font-mono ${parseFloat(quote.priceImpact) > 1 ? 'text-[#f59e0b]' : 'text-[#10b981]'}`}>
-                {quote.priceImpact}%
-              </span>
+              {quote.isFixedRate ? (
+                <span className="font-mono text-[#10b981] flex items-center gap-1">
+                  <Lock className="w-3 h-3" />
+                  Fixed
+                </span>
+              ) : (
+                <span className={`font-mono ${parseFloat(quote.priceImpact) > 1 ? 'text-[#f59e0b]' : 'text-[#10b981]'}`}>
+                  {quote.priceImpact}%
+                </span>
+              )}
             </div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-[#A3A3A3]">Minimum Received</span>
