@@ -34,7 +34,9 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
     swapStatus,
     error,
     slippageBps,
+    approvalStrategy,
     setSlippageBps,
+    setApprovalStrategy,
     setTokenIn,
     setTokenOut,
     setAmountIn,
@@ -257,6 +259,26 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
                   }`}
                 >
                   {bps / 100}%
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-sm font-semibold text-[#A3A3A3]">Token Approval</span>
+              <span className="text-xs text-[#A3A3A3]">Exact approvals are safer</span>
+            </div>
+            <div className="flex gap-2">
+              {(['exact', 'infinite'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setApprovalStrategy(mode)}
+                  className={`flex-1 py-1.5 rounded-lg text-sm font-semibold transition-all ${
+                    approvalStrategy === mode
+                      ? 'bg-[#9E7FFF] text-white'
+                      : 'bg-[#262626] text-[#A3A3A3] hover:bg-[#333] hover:text-white'
+                  }`}
+                >
+                  {mode === 'exact' ? 'Exact' : 'Infinite'}
                 </button>
               ))}
             </div>

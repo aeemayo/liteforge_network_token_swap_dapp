@@ -20,6 +20,13 @@ contract LiteforgeSwap {
     // State variables
     address public owner;
     uint256 public feePercentage = 30; // 0.3% fee (30 basis points)
+
+    // Timelock settings for sensitive admin actions
+    uint256 public constant TIMELOCK_DELAY = 1 days;
+    uint256 public pendingFee;
+    uint256 public pendingFeeEta;
+
+    address public pendingOwner;
     
     // Liquidity provider tracking (pair-specific)
     mapping(address => mapping(address => mapping(address => uint256))) public liquidityBalance;
@@ -31,6 +38,14 @@ contract LiteforgeSwap {
     // Supported tokens
     mapping(address => bool) public supportedTokens;
     address[] public tokenList;
+
+    // Timelocked token additions
+    mapping(address => uint256) public tokenActivationTime;
+    mapping(address => string) private pendingTokenSymbols;
+
+    // Fixed-rate registry for native <-> ERC-20 swaps
+    // Rate is expressed as token-wei per 1e18 native-wei.
+    mapping(address => uint256) public fixedRateTokensPerNative;
     
     // Events
     event Swap(
@@ -62,6 +77,11 @@ contract LiteforgeSwap {
     
     event TokenAdded(address indexed token, string symbol);
     event FeeUpdated(uint256 oldFee, uint256 newFee);
+    event FeeUpdateScheduled(uint256 newFee, uint256 executeAfter);
+    event OwnershipTransferStarted(address indexed currentOwner, address indexed pendingOwner);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    event TokenAdditionScheduled(address indexed token, uint256 executeAfter, string symbol);
+    event FixedRateUpdated(address indexed token, uint256 tokensPerNative);
     
     // Modifiers
     modifier onlyOwner() {
@@ -89,6 +109,28 @@ contract LiteforgeSwap {
         supportedTokens[NATIVE_TOKEN] = true;
         tokenList.push(NATIVE_TOKEN);
         emit TokenAdded(NATIVE_TOKEN, "zkLTC");
+    }
+
+    // ── Ownership ───────────────────────────────────────────────────
+
+    /**
+     * @notice Start ownership transfer to a new owner (two-step)
+     */
+    function transferOwnership(address newOwner) external onlyOwner {
+        require(newOwner != address(0), "Invalid owner address");
+        pendingOwner = newOwner;
+        emit OwnershipTransferStarted(owner, newOwner);
+    }
+
+    /**
+     * @notice Accept ownership transfer
+     */
+    function acceptOwnership() external {
+        require(msg.sender == pendingOwner, "Only pending owner can accept");
+        address previousOwner = owner;
+        owner = pendingOwner;
+        pendingOwner = address(0);
+        emit OwnershipTransferred(previousOwner, owner);
     }
 
     /// @notice Accept plain native-token transfers (e.g. for liquidity)
@@ -140,11 +182,28 @@ contract LiteforgeSwap {
     function addSupportedToken(address token, string memory symbol) external onlyOwner {
         require(token != address(0), "Invalid token address");
         require(!supportedTokens[token], "Token already supported");
-        
+        uint256 executeAfter = block.timestamp + TIMELOCK_DELAY;
+        tokenActivationTime[token] = executeAfter;
+        pendingTokenSymbols[token] = symbol;
+        emit TokenAdditionScheduled(token, executeAfter, symbol);
+    }
+
+    /**
+     * @notice Execute a scheduled token addition after timelock expires
+     */
+    function executeAddSupportedToken(address token) external onlyOwner {
+        uint256 executeAfter = tokenActivationTime[token];
+        require(executeAfter > 0, "Token not scheduled");
+        require(block.timestamp >= executeAfter, "Token timelock active");
+        require(!supportedTokens[token], "Token already supported");
+
         supportedTokens[token] = true;
         tokenList.push(token);
-        
-        emit TokenAdded(token, symbol);
+
+        emit TokenAdded(token, pendingTokenSymbols[token]);
+
+        tokenActivationTime[token] = 0;
+        delete pendingTokenSymbols[token];
     }
     
     /**
@@ -286,13 +345,30 @@ contract LiteforgeSwap {
         
         uint256 reserveIn = reserves[tokenIn][tokenOut];
         uint256 reserveOut = reserves[tokenOut][tokenIn];
-        
+
         require(reserveIn > 0 && reserveOut > 0, "Insufficient liquidity");
-        
+
         uint256 amountInWithFee = receivedIn * (10000 - feePercentage);
         uint256 fee = (receivedIn * feePercentage) / 10000;
-        
-        amountOut = (amountInWithFee * reserveOut) / (reserveIn * 10000 + amountInWithFee);
+
+        uint256 fixedRate = 0;
+        if (_isNative(tokenIn) && !_isNative(tokenOut)) {
+            fixedRate = fixedRateTokensPerNative[tokenOut];
+        } else if (_isNative(tokenOut) && !_isNative(tokenIn)) {
+            fixedRate = fixedRateTokensPerNative[tokenIn];
+        }
+
+        if (fixedRate > 0) {
+            // Fixed-rate swap (native <-> ERC-20 only)
+            if (_isNative(tokenIn)) {
+                amountOut = (amountInWithFee * fixedRate) / 1e18;
+            } else {
+                amountOut = (amountInWithFee * 1e18) / fixedRate;
+            }
+        } else {
+            // AMM swap
+            amountOut = (amountInWithFee * reserveOut) / (reserveIn * 10000 + amountInWithFee);
+        }
         
         require(amountOut > 0, "Insufficient output amount");
         require(amountOut < reserveOut, "Insufficient liquidity for swap");
@@ -323,14 +399,30 @@ contract LiteforgeSwap {
         
         uint256 reserveIn = reserves[tokenIn][tokenOut];
         uint256 reserveOut = reserves[tokenOut][tokenIn];
-        
+
         if (reserveIn == 0 || reserveOut == 0) {
             return (0, 0);
         }
-        
+
         fee = amountIn * feePercentage / 10000;
         uint256 amountInWithFee = amountIn * (10000 - feePercentage);
-        amountOut = (amountInWithFee * reserveOut) / (reserveIn * 10000 + amountInWithFee);
+
+        uint256 fixedRate = 0;
+        if (_isNative(tokenIn) && !_isNative(tokenOut)) {
+            fixedRate = fixedRateTokensPerNative[tokenOut];
+        } else if (_isNative(tokenOut) && !_isNative(tokenIn)) {
+            fixedRate = fixedRateTokensPerNative[tokenIn];
+        }
+
+        if (fixedRate > 0) {
+            if (_isNative(tokenIn)) {
+                amountOut = (amountInWithFee * fixedRate) / 1e18;
+            } else {
+                amountOut = (amountInWithFee * 1e18) / fixedRate;
+            }
+        } else {
+            amountOut = (amountInWithFee * reserveOut) / (reserveIn * 10000 + amountInWithFee);
+        }
     }
     
     /**
@@ -353,9 +445,34 @@ contract LiteforgeSwap {
      */
     function updateFee(uint256 newFee) external onlyOwner {
         require(newFee <= 1000, "Fee too high"); // Max 10%
+        uint256 executeAfter = block.timestamp + TIMELOCK_DELAY;
+        pendingFee = newFee;
+        pendingFeeEta = executeAfter;
+        emit FeeUpdateScheduled(newFee, executeAfter);
+    }
+
+    /**
+     * @notice Execute a scheduled fee change after timelock expires
+     */
+    function executeFeeUpdate() external onlyOwner {
+        require(pendingFeeEta > 0, "No fee update scheduled");
+        require(block.timestamp >= pendingFeeEta, "Fee timelock active");
         uint256 oldFee = feePercentage;
-        feePercentage = newFee;
-        emit FeeUpdated(oldFee, newFee);
+        feePercentage = pendingFee;
+        pendingFee = 0;
+        pendingFeeEta = 0;
+        emit FeeUpdated(oldFee, feePercentage);
+    }
+
+    /**
+     * @notice Set or clear fixed rate for a token against native zkLTC
+     * @dev tokensPerNative is token-wei per 1e18 native-wei. Set to 0 to disable.
+     */
+    function setFixedRate(address token, uint256 tokensPerNative) external onlyOwner {
+        require(token != address(0), "Invalid token address");
+        require(!_isNative(token), "Fixed rate not allowed for native");
+        fixedRateTokensPerNative[token] = tokensPerNative;
+        emit FixedRateUpdated(token, tokensPerNative);
     }
     
     /**

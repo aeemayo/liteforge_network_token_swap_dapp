@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Token } from '../utils/tokens';
-import { getSwapQuote, executeSwap, SwapExecutionStatus, SwapQuote } from '../utils/web3';
+import { getSwapQuote, executeSwap, ApprovalStrategy, SwapExecutionStatus, SwapQuote } from '../utils/web3';
 
 export const useSwap = () => {
   const [tokenIn, setTokenIn] = useState<Token | null>(null);
@@ -12,6 +12,7 @@ export const useSwap = () => {
   const [swapStatus, setSwapStatus] = useState<SwapExecutionStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [slippageBps, setSlippageBps] = useState<number>(50); // 0.5% default
+  const [approvalStrategy, setApprovalStrategy] = useState<ApprovalStrategy>('exact');
 
   useEffect(() => {
     const fetchQuote = async () => {
@@ -48,6 +49,7 @@ export const useSwap = () => {
       setError(null);
       const result = await executeSwap(tokenIn, tokenOut, amountIn, quote.minimumReceived, {
         onStatusChange: setSwapStatus,
+        approvalStrategy,
       });
       
       if (!result.success) {
@@ -82,7 +84,9 @@ export const useSwap = () => {
     swapStatus,
     error,
     slippageBps,
+    approvalStrategy,
     setSlippageBps,
+    setApprovalStrategy,
     setTokenIn,
     setTokenOut,
     setAmountIn,

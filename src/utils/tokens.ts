@@ -36,7 +36,8 @@ export const loadCustomTokens = (): Token[] => {
     const raw = localStorage.getItem(CUSTOM_TOKENS_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isValidCustomToken).map(normalizeCustomToken);
   } catch {
     return [];
   }
@@ -65,3 +66,27 @@ export const addCustomToken = (token: Token): Token[] => {
 export const isEthereumAddress = (value: string): boolean => {
   return /^0x[0-9a-fA-F]{40}$/.test(value.trim());
 };
+
+const isValidCustomToken = (value: unknown): value is Token => {
+  if (!value || typeof value !== 'object') return false;
+  const token = value as Token;
+  if (!isEthereumAddress(token.address)) return false;
+  if (typeof token.symbol !== 'string' || token.symbol.trim().length === 0) return false;
+  if (typeof token.name !== 'string' || token.name.trim().length === 0) return false;
+  if (!Number.isInteger(token.decimals) || token.decimals < 0 || token.decimals > 255) return false;
+  return true;
+};
+
+const sanitizeLogoUrl = (logoUrl?: string): string => {
+  if (!logoUrl) return '/liteforge-logo.png';
+  if (logoUrl.startsWith('/')) return logoUrl;
+  return '/liteforge-logo.png';
+};
+
+const normalizeCustomToken = (token: Token): Token => ({
+  ...token,
+  address: token.address.trim(),
+  symbol: token.symbol.trim(),
+  name: token.name.trim(),
+  logoUrl: sanitizeLogoUrl(token.logoUrl),
+});

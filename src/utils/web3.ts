@@ -1,6 +1,5 @@
 import { ethers } from 'ethers';
 import { Token } from './tokens';
-import { computeFixedRateQuote, hasFixedRate } from './fixedRates';
 
 export interface WalletState {
   address: string | null;
@@ -19,8 +18,11 @@ export interface SwapQuote {
 
 export type SwapExecutionStatus = 'checking-allowance' | 'approving' | 'swapping';
 
+export type ApprovalStrategy = 'exact' | 'infinite';
+
 interface SwapExecutionOptions {
   onStatusChange?: (status: SwapExecutionStatus) => void;
+  approvalStrategy?: ApprovalStrategy;
 }
 
 interface WalletAsset {
@@ -57,6 +59,7 @@ export const SWAP_CONTRACT_ABI = [
   'function addSupportedToken(address token, string symbol)',
   'function owner() view returns (address)',
   'function totalLiquidity(address, address) view returns (uint256)',
+  'function fixedRateTokensPerNative(address) view returns (uint256)',
   'event Swap(address indexed user, address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut, uint256 fee)',
   'event LiquidityAdded(address indexed provider, address indexed tokenA, address indexed tokenB, uint256 amountA, uint256 amountB, uint256 liquidity)',
   'event LiquidityRemoved(address indexed provider, address indexed tokenA, address indexed tokenB, uint256 amountA, uint256 amountB, uint256 liquidity)',
@@ -73,6 +76,13 @@ const ERC20_ABI = [
 
 const FALLBACK_TOKEN_LOGO_URL = '/liteforge-logo.png';
 const NATIVE_ZKLTC_PLACEHOLDER_ADDRESS = '0x0000000000000000000000000000000000000001';
+
+const sanitizeLogoUrl = (logoUrl?: string): string => {
+  if (!logoUrl) return FALLBACK_TOKEN_LOGO_URL;
+  // Only allow same-origin or relative asset paths to avoid remote tracking.
+  if (logoUrl.startsWith('/')) return logoUrl;
+  return FALLBACK_TOKEN_LOGO_URL;
+};
 
 const requireEthereumProvider = (): EthereumProvider => {
   if (!window.ethereum) {
@@ -105,7 +115,15 @@ export const getSwapContractAddress = (): string => {
     throw new Error('Missing VITE_SWAP_CONTRACT_ADDRESS. Set it in your .env file.');
   }
 
-  return address;
+  try {
+    const checksummed = ethers.getAddress(address);
+    if (checksummed === ethers.ZeroAddress) {
+      throw new Error('Contract address cannot be zero address.');
+    }
+    return checksummed;
+  } catch {
+    throw new Error('Invalid VITE_SWAP_CONTRACT_ADDRESS format.');
+  }
 };
 
 const getExplorerTxBaseUrl = (): string | null => {
@@ -246,7 +264,7 @@ export const getTokenMetadata = async (tokenAddress: string, logoUrl?: string): 
       name,
       symbol,
       decimals,
-      logoUrl: logoUrl && logoUrl.length > 0 ? logoUrl : FALLBACK_TOKEN_LOGO_URL,
+      logoUrl: sanitizeLogoUrl(logoUrl),
     };
   } catch (err) {
     if (err instanceof Error && err.message.startsWith('Invalid')) {
@@ -400,7 +418,7 @@ const discoverWalletAssets = async (): Promise<Token[]> => {
         symbol: asset.symbol,
         name: typeof asset.name === 'string' && asset.name.length > 0 ? asset.name : asset.symbol,
         decimals: parsedDecimals,
-        logoUrl: typeof asset.image === 'string' && asset.image.length > 0 ? asset.image : FALLBACK_TOKEN_LOGO_URL,
+        logoUrl: sanitizeLogoUrl(typeof asset.image === 'string' ? asset.image : undefined),
       });
       continue;
     }
@@ -574,32 +592,7 @@ export const getSwapQuote = async (
     throw new Error('Invalid input amount');
   }
 
-  // ── Fixed-rate path: deterministic client-side pricing ──
-  if (hasFixedRate(tokenIn.address, tokenOut.address)) {
-    const fixedQuote = computeFixedRateQuote(
-      tokenIn.address,
-      tokenOut.address,
-      amountIn,
-      30, // 0.30% fee
-    );
-
-    if (!fixedQuote) {
-      throw new Error('Invalid input amount');
-    }
-
-    const amountOutNum = parseFloat(fixedQuote.amountOut);
-    const minimumReceivedNum = amountOutNum * (1 - slippageBps / 10_000);
-
-    return {
-      amountOut: fixedQuote.amountOut,
-      fee: fixedQuote.fee,
-      priceImpact: '0.00', // Fixed rate → no price impact
-      minimumReceived: minimumReceivedNum.toFixed(6),
-      isFixedRate: true,
-    };
-  }
-
-  // ── AMM path: on-chain quote from the swap contract ──
+  // ── On-chain quote from the swap contract ──
   const ethereum = requireEthereumProvider();
   const provider = new ethers.BrowserProvider(ethereum);
   const contractAddress = getSwapContractAddress();
@@ -654,17 +647,28 @@ export const getSwapQuote = async (
 
   let reserveInWei = 0n;
   let reserveOutWei = 0n;
+  let isFixedRate = false;
   try {
     [reserveInWei, reserveOutWei] = await swapContract.getReserves(tokenIn.address, tokenOut.address) as [bigint, bigint];
   } catch {
     // Non-critical — price impact will just show 0
   }
 
+  if (tokenIn.isNative || tokenOut.isNative) {
+    const fixedRateToken = tokenIn.isNative ? tokenOut.address : tokenIn.address;
+    try {
+      const fixedRate = await swapContract.fixedRateTokensPerNative(fixedRateToken) as bigint;
+      isFixedRate = fixedRate > 0n;
+    } catch {
+      isFixedRate = false;
+    }
+  }
+
   const amountOut = toDisplayAmount(amountOutWei, tokenOut.decimals);
   const fee = toDisplayAmount(feeWei, tokenIn.decimals);
 
   let priceImpact = '0.00';
-  if (reserveInWei > 0n && reserveOutWei > 0n && amountInNum > 0) {
+  if (!isFixedRate && reserveInWei > 0n && reserveOutWei > 0n && amountInNum > 0) {
     const reserveIn = Number.parseFloat(ethers.formatUnits(reserveInWei, tokenIn.decimals));
     const reserveOut = Number.parseFloat(ethers.formatUnits(reserveOutWei, tokenOut.decimals));
     const spotPrice = reserveOut / reserveIn;
@@ -684,7 +688,7 @@ export const getSwapQuote = async (
     fee,
     priceImpact,
     minimumReceived,
-    isFixedRate: false,
+    isFixedRate,
   };
 };
 
@@ -719,8 +723,14 @@ export const executeSwap = async (
   const contractAddress = getSwapContractAddress();
   const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, signer);
 
-  // Auto-register tokens on the contract if needed
-  await ensureTokensRegistered([tokenIn, tokenOut], signer);
+  const [tokenInSupported, tokenOutSupported] = await Promise.all([
+    swapContract.supportedTokens(tokenIn.address) as Promise<boolean>,
+    swapContract.supportedTokens(tokenOut.address) as Promise<boolean>,
+  ]);
+
+  if (!tokenInSupported || !tokenOutSupported) {
+    throw new Error('One or both tokens are not supported by the swap contract.');
+  }
 
   const amountInWei = ethers.parseUnits(amountIn, tokenIn.decimals);
   const minimumExpectedOutWei = ethers.parseUnits(minimumExpectedAmountOut, tokenOut.decimals);
@@ -735,7 +745,9 @@ export const executeSwap = async (
 
     if (currentAllowance < amountInWei) {
       options?.onStatusChange?.('approving');
-      const approveTx = await tokenInContract.approve(contractAddress, ethers.MaxUint256);
+      const approvalStrategy = options?.approvalStrategy ?? 'exact';
+      const approvalAmount = approvalStrategy === 'infinite' ? ethers.MaxUint256 : amountInWei;
+      const approveTx = await tokenInContract.approve(contractAddress, approvalAmount);
       const approveReceipt = await approveTx.wait();
       if (!approveReceipt || approveReceipt.status !== 1) {
         throw new Error('Approval transaction failed');
@@ -795,56 +807,6 @@ export const formatTokenAmount = (amount: string, decimals: number = 6): string 
 };
 
 
-// ── Auto-registration helper ──
-
-/**
- * Checks whether each token is registered on the swap contract.
- * If the connected wallet is the contract owner, any unregistered tokens
- * are automatically registered before proceeding.
- */
-const ensureTokensRegistered = async (
-  tokens: Token[],
-  signer: ethers.Signer,
-): Promise<void> => {
-  const contractAddress = getSwapContractAddress();
-  const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, signer);
-
-  for (const token of tokens) {
-    // Check if already supported — if the view call fails, assume not supported
-    let isSupported = false;
-    try {
-      isSupported = await swapContract.supportedTokens(token.address) as boolean;
-    } catch {
-      // View call failed (RPC issue, missing code, etc.) — proceed to try registration
-      isSupported = false;
-    }
-    if (isSupported) continue;
-
-    // Attempt auto-registration — will revert if the signer is not the owner
-    try {
-      const tx = await swapContract.addSupportedToken(token.address, token.symbol);
-      const receipt = await tx.wait();
-      if (!receipt || receipt.status !== 1) {
-        throw new Error(`Failed to register ${token.symbol} on the swap contract.`);
-      }
-    } catch (err: any) {
-      // If the signer is not the owner, the contract will revert
-      const reason = err?.reason || err?.message || '';
-      if (reason.includes('Only owner')) {
-        throw new Error(
-          `${token.symbol} is not registered on the swap contract and your wallet is not the contract owner. ` +
-          'Ask the contract owner to register this token.'
-        );
-      }
-      // "Token already supported" means it was registered between our check and now — safe to continue
-      if (reason.includes('already supported')) {
-        continue;
-      }
-      throw err;
-    }
-  }
-};
-
 // ── Liquidity functions ──
 
 export type LiquidityStatus = 'approving-a' | 'approving-b' | 'adding';
@@ -854,7 +816,8 @@ export const executeAddLiquidity = async (
   tokenB: Token,
   amountA: string,
   amountB: string,
-  onStatus?: (status: LiquidityStatus) => void
+  onStatus?: (status: LiquidityStatus) => void,
+  approvalStrategy: ApprovalStrategy = 'exact'
 ): Promise<{ txHash: string; success: boolean }> => {
   const amountANum = Number.parseFloat(amountA);
   const amountBNum = Number.parseFloat(amountB);
@@ -874,8 +837,14 @@ export const executeAddLiquidity = async (
   const contractAddress = getSwapContractAddress();
   const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, signer);
 
-  // Auto-register tokens on the contract if needed
-  await ensureTokensRegistered([tokenA, tokenB], signer);
+  const [tokenASupported, tokenBSupported] = await Promise.all([
+    swapContract.supportedTokens(tokenA.address) as Promise<boolean>,
+    swapContract.supportedTokens(tokenB.address) as Promise<boolean>,
+  ]);
+
+  if (!tokenASupported || !tokenBSupported) {
+    throw new Error('One or both tokens are not supported by the swap contract.');
+  }
 
   const amountAWei = ethers.parseUnits(amountA, tokenA.decimals);
   const amountBWei = ethers.parseUnits(amountB, tokenB.decimals);
@@ -889,7 +858,8 @@ export const executeAddLiquidity = async (
     const tokenAContract = new ethers.Contract(tokenA.address, ERC20_ABI, signer);
     const allowanceA = await tokenAContract.allowance(signerAddress, contractAddress) as bigint;
     if (allowanceA < amountAWei) {
-      const approveTx = await tokenAContract.approve(contractAddress, ethers.MaxUint256);
+      const approvalAmount = approvalStrategy === 'infinite' ? ethers.MaxUint256 : amountAWei;
+      const approveTx = await tokenAContract.approve(contractAddress, approvalAmount);
       const receipt = await approveTx.wait();
       if (!receipt || receipt.status !== 1) {
         throw new Error(`${tokenA.symbol} approval failed`);
@@ -902,7 +872,8 @@ export const executeAddLiquidity = async (
     const tokenBContract = new ethers.Contract(tokenB.address, ERC20_ABI, signer);
     const allowanceB = await tokenBContract.allowance(signerAddress, contractAddress) as bigint;
     if (allowanceB < amountBWei) {
-      const approveTx = await tokenBContract.approve(contractAddress, ethers.MaxUint256);
+      const approvalAmount = approvalStrategy === 'infinite' ? ethers.MaxUint256 : amountBWei;
+      const approveTx = await tokenBContract.approve(contractAddress, approvalAmount);
       const receipt = await approveTx.wait();
       if (!receipt || receipt.status !== 1) {
         throw new Error(`${tokenB.symbol} approval failed`);
