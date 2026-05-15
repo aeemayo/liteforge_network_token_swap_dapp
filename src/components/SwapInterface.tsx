@@ -203,6 +203,7 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
         {/* ── Direction Tabs ── */}
         <div className="flex items-center gap-2 mb-5">
           <button
+            type="button"
             onClick={() => handleDirectionChange('buy')}
             className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 ${
               direction === 'buy'
@@ -214,6 +215,7 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
             Buy Token
           </button>
           <button
+            type="button"
             onClick={() => handleDirectionChange('sell')}
             className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 ${
               direction === 'sell'
@@ -225,7 +227,9 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
             Sell Token
           </button>
           <button
+            type="button"
             onClick={() => setShowSettings(!showSettings)}
+            aria-label="Settings"
             className="p-2.5 rounded-xl text-[#A3A3A3] hover:text-[#FFFFFF] bg-[#171717] border border-[#2F2F2F] hover:border-[#9E7FFF]/30 transition-all duration-300"
           >
             <Settings className="w-5 h-5" />
@@ -243,7 +247,9 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
               {[10, 50, 100].map((bps) => (
                 <button
                   key={bps}
+                  type="button"
                   onClick={() => setSlippageBps(bps)}
+                  aria-label={`Set slippage to ${bps / 100}%`}
                   className={`flex-1 py-1.5 rounded-lg text-sm font-semibold transition-all ${
                     slippageBps === bps
                       ? 'bg-[#9E7FFF] text-white'
@@ -288,7 +294,9 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
                 </span>
                 {tokenInBalance && parseFloat(tokenInBalance) > 0 && (
                   <button
+                    type="button"
                     onClick={handleMax}
+                    aria-label="Use max balance"
                     className="px-2 py-0.5 text-[10px] font-bold rounded bg-[#9E7FFF]/20 text-[#9E7FFF] hover:bg-[#9E7FFF]/30 transition-colors uppercase tracking-wide"
                   >
                     Max
@@ -350,6 +358,8 @@ export const SwapInterface: React.FC<SwapInterfaceProps> = ({
         {/* ── Switch Button ── */}
         <div className="flex justify-center -my-2 relative z-10">
           <button
+            type="button"
+            aria-label={direction === 'buy' ? 'Switch to sell mode' : 'Switch to buy mode'}
             onClick={() => handleDirectionChange(direction === 'buy' ? 'sell' : 'buy')}
             className="group p-3 bg-[#262626] hover:bg-[#2F2F2F] rounded-xl border-4 border-[#171717] transition-all duration-300 hover:scale-110 hover:rotate-180"
           >
