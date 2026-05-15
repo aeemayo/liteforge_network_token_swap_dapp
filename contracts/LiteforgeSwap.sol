@@ -39,9 +39,6 @@ contract LiteforgeSwap {
     mapping(address => bool) public supportedTokens;
     address[] public tokenList;
 
-    // Timelocked token additions
-    mapping(address => uint256) public tokenActivationTime;
-    mapping(address => string) private pendingTokenSymbols;
 
     // Fixed-rate registry for native <-> ERC-20 swaps
     // Rate is expressed as token-wei per 1e18 native-wei.
@@ -80,7 +77,6 @@ contract LiteforgeSwap {
     event FeeUpdateScheduled(uint256 newFee, uint256 executeAfter);
     event OwnershipTransferStarted(address indexed currentOwner, address indexed pendingOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
-    event TokenAdditionScheduled(address indexed token, uint256 executeAfter, string symbol);
     event FixedRateUpdated(address indexed token, uint256 tokensPerNative);
     
     // Modifiers
@@ -182,28 +178,9 @@ contract LiteforgeSwap {
     function addSupportedToken(address token, string memory symbol) external onlyOwner {
         require(token != address(0), "Invalid token address");
         require(!supportedTokens[token], "Token already supported");
-        uint256 executeAfter = block.timestamp + TIMELOCK_DELAY;
-        tokenActivationTime[token] = executeAfter;
-        pendingTokenSymbols[token] = symbol;
-        emit TokenAdditionScheduled(token, executeAfter, symbol);
-    }
-
-    /**
-     * @notice Execute a scheduled token addition after timelock expires
-     */
-    function executeAddSupportedToken(address token) external onlyOwner {
-        uint256 executeAfter = tokenActivationTime[token];
-        require(executeAfter > 0, "Token not scheduled");
-        require(block.timestamp >= executeAfter, "Token timelock active");
-        require(!supportedTokens[token], "Token already supported");
-
         supportedTokens[token] = true;
         tokenList.push(token);
-
-        emit TokenAdded(token, pendingTokenSymbols[token]);
-
-        tokenActivationTime[token] = 0;
-        delete pendingTokenSymbols[token];
+        emit TokenAdded(token, symbol);
     }
     
     /**

@@ -723,14 +723,8 @@ export const executeSwap = async (
   const contractAddress = getSwapContractAddress();
   const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, signer);
 
-  const [tokenInSupported, tokenOutSupported] = await Promise.all([
-    swapContract.supportedTokens(tokenIn.address) as Promise<boolean>,
-    swapContract.supportedTokens(tokenOut.address) as Promise<boolean>,
-  ]);
-
-  if (!tokenInSupported || !tokenOutSupported) {
-    throw new Error('One or both tokens are not supported by the swap contract.');
-  }
+  // Auto-register tokens on the contract if needed
+  await ensureTokensRegistered([tokenIn, tokenOut], signer);
 
   const amountInWei = ethers.parseUnits(amountIn, tokenIn.decimals);
   const minimumExpectedOutWei = ethers.parseUnits(minimumExpectedAmountOut, tokenOut.decimals);
@@ -807,6 +801,57 @@ export const formatTokenAmount = (amount: string, decimals: number = 6): string 
 };
 
 
+// ── Auto-registration helper ──
+
+/**
+ * Checks whether each token is registered on the swap contract.
+ * If the connected wallet is the contract owner, any unregistered tokens
+ * are automatically registered before proceeding.
+ */
+const ensureTokensRegistered = async (
+  tokens: Token[],
+  signer: ethers.Signer,
+): Promise<void> => {
+  const contractAddress = getSwapContractAddress();
+  const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, signer);
+
+  for (const token of tokens) {
+    // Check if already supported — if the view call fails, assume not supported
+    let isSupported = false;
+    try {
+      isSupported = await swapContract.supportedTokens(token.address) as boolean;
+    } catch {
+      // View call failed (RPC issue, missing code, etc.) — proceed to try registration
+      isSupported = false;
+    }
+    if (isSupported) continue;
+
+    // Attempt auto-registration — will revert if the signer is not the owner
+    try {
+      const tx = await swapContract.addSupportedToken(token.address, token.symbol);
+      const receipt = await tx.wait();
+      if (!receipt || receipt.status !== 1) {
+        throw new Error(`Failed to register ${token.symbol} on the swap contract.`);
+      }
+    } catch (err: any) {
+      // If the signer is not the owner, the contract will revert
+      const reason = err?.reason || err?.message || '';
+      if (reason.includes('Only owner')) {
+        throw new Error(
+          `${token.symbol} is not registered on the swap contract and your wallet is not the contract owner. ` +
+          'Ask the contract owner to register this token.'
+        );
+      }
+      // "Token already supported" means it was registered between our check and now — safe to continue
+      if (reason.includes('already supported')) {
+        continue;
+      }
+      throw err;
+    }
+  }
+};
+
+
 // ── Liquidity functions ──
 
 export type LiquidityStatus = 'approving-a' | 'approving-b' | 'adding';
@@ -837,14 +882,8 @@ export const executeAddLiquidity = async (
   const contractAddress = getSwapContractAddress();
   const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, signer);
 
-  const [tokenASupported, tokenBSupported] = await Promise.all([
-    swapContract.supportedTokens(tokenA.address) as Promise<boolean>,
-    swapContract.supportedTokens(tokenB.address) as Promise<boolean>,
-  ]);
-
-  if (!tokenASupported || !tokenBSupported) {
-    throw new Error('One or both tokens are not supported by the swap contract.');
-  }
+  // Auto-register tokens on the contract if needed
+  await ensureTokensRegistered([tokenA, tokenB], signer);
 
   const amountAWei = ethers.parseUnits(amountA, tokenA.decimals);
   const amountBWei = ethers.parseUnits(amountB, tokenB.decimals);
