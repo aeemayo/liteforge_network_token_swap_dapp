@@ -151,8 +151,6 @@ function App() {
               <ul className="space-y-2 text-[#A3A3A3]">
                 <li><a href="#" className="hover:text-[#9E7FFF] transition-colors">Swap</a></li>
                 <li><a href="#" className="hover:text-[#9E7FFF] transition-colors">Liquidity</a></li>
-                <li><a href="#" className="hover:text-[#9E7FFF] transition-colors">Analytics</a></li>
-                <li><a href="#" className="hover:text-[#9E7FFF] transition-colors">Governance</a></li>
               </ul>
             </div>
 
