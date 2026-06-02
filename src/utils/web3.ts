@@ -524,9 +524,32 @@ export const connectWallet = async (): Promise<WalletState> => {
 };
 
 export const disconnectWallet = async (): Promise<void> => {
-  // EVM wallets do not support a programmatic disconnect for dapps.
-  // We keep this for API symmetry and clear local UI state in hooks.
-  return Promise.resolve();
+  const ethereum = requireEthereumProvider();
+
+  try {
+    await ethereum.request({
+      method: 'wallet_revokePermissions',
+      params: [{ eth_accounts: {} }],
+    });
+  } catch (err: unknown) {
+    const code = getErrorCode(err);
+    if (code === 4001) {
+      throw new Error('User rejected wallet disconnect.');
+    }
+
+    throw new Error(
+      'This wallet does not support app-triggered disconnect. ' +
+      'Remove this site from the wallet connected-sites or permissions panel.'
+    );
+  }
+
+  const remainingAddress = await getWalletAddress();
+  if (remainingAddress) {
+    throw new Error(
+      'Wallet permission could not be revoked. ' +
+      'Remove this site from the wallet connected-sites or permissions panel.'
+    );
+  }
 };
 
 export const subscribeWalletEvents = (

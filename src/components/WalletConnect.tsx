@@ -6,6 +6,7 @@ interface WalletConnectProps {
   address: string | null;
   connected: boolean;
   connecting: boolean;
+  disconnecting: boolean;
   onConnect: () => void;
   onDisconnect: () => void;
 }
@@ -14,6 +15,7 @@ export const WalletConnect: React.FC<WalletConnectProps> = ({
   address,
   connected,
   connecting,
+  disconnecting,
   onConnect,
   onDisconnect,
 }) => {
@@ -26,10 +28,11 @@ export const WalletConnect: React.FC<WalletConnectProps> = ({
         </div>
         <button
           onClick={onDisconnect}
-          className="flex items-center gap-2 px-4 py-2 bg-[#262626] hover:bg-[#2F2F2F] text-[#FFFFFF] rounded-xl border border-[#2F2F2F] transition-all duration-200 hover:scale-105"
+          disabled={disconnecting}
+          className="flex items-center gap-2 px-4 py-2 bg-[#262626] hover:bg-[#2F2F2F] text-[#FFFFFF] rounded-xl border border-[#2F2F2F] transition-all duration-200 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
         >
-          <LogOut className="w-4 h-4" />
-          <span className="hidden sm:inline">Disconnect</span>
+          {disconnecting ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}
+          <span className="hidden sm:inline">{disconnecting ? 'Disconnecting...' : 'Disconnect'}</span>
         </button>
       </div>
     );

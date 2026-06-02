@@ -14,6 +14,7 @@ export const useWallet = () => {
     connected: false,
   });
   const [connecting, setConnecting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -71,6 +72,7 @@ export const useWallet = () => {
 
   const disconnect = async () => {
     try {
+      setDisconnecting(true);
       await disconnectWallet();
       setWallet({
         address: null,
@@ -80,12 +82,15 @@ export const useWallet = () => {
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to disconnect wallet');
+    } finally {
+      setDisconnecting(false);
     }
   };
 
   return {
     wallet,
     connecting,
+    disconnecting,
     error,
     connect,
     disconnect,

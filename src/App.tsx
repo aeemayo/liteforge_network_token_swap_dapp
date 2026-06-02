@@ -7,7 +7,7 @@ import { useWallet } from './hooks/useWallet';
 import { useTokens } from './hooks/useTokens';
 
 function App() {
-  const { wallet, connecting, error, connect, disconnect } = useWallet();
+  const { wallet, connecting, disconnecting, error, connect, disconnect } = useWallet();
   const { availableTokens, syncing, addCustomToken } = useTokens(
     wallet.connected,
     wallet.address,
@@ -55,6 +55,7 @@ function App() {
               address={wallet.address}
               connected={wallet.connected}
               connecting={connecting}
+              disconnecting={disconnecting}
               onConnect={connect}
               onDisconnect={disconnect}
             />
