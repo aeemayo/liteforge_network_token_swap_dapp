@@ -168,6 +168,33 @@ contract LiteforgeSwap {
         }
     }
 
+    function _contractBalance(address token) internal view returns (uint256) {
+        if (_isNative(token)) {
+            return address(this).balance;
+        }
+
+        return IERC20(token).balanceOf(address(this));
+    }
+
+    function _reservedBalance(address token) internal view returns (uint256 totalReserved) {
+        for (uint256 i = 0; i < tokenList.length; i++) {
+            address pairedToken = tokenList[i];
+            if (pairedToken != token) {
+                totalReserved += reserves[token][pairedToken];
+            }
+        }
+    }
+
+    function _availableTreasuryBalance(address token) internal view returns (uint256) {
+        uint256 balance = _contractBalance(token);
+        uint256 reserved = _reservedBalance(token);
+        if (balance <= reserved) {
+            return 0;
+        }
+
+        return balance - reserved;
+    }
+
     // ── Token management ────────────────────────────────────────────
 
     /**
@@ -320,11 +347,6 @@ contract LiteforgeSwap {
         
         uint256 receivedIn = _pullTokensAndGetReceived(tokenIn, msg.sender, amountIn);
         
-        uint256 reserveIn = reserves[tokenIn][tokenOut];
-        uint256 reserveOut = reserves[tokenOut][tokenIn];
-
-        require(reserveIn > 0 && reserveOut > 0, "Insufficient liquidity");
-
         uint256 amountInWithFee = receivedIn * (10000 - feePercentage);
         uint256 fee = (receivedIn * feePercentage) / 10000;
 
@@ -337,26 +359,40 @@ contract LiteforgeSwap {
 
         if (fixedRate > 0) {
             // Fixed-rate swap (native <-> ERC-20 only)
+            uint256 netAmountIn = amountInWithFee / 10000;
             if (_isNative(tokenIn)) {
-                amountOut = (amountInWithFee * fixedRate) / 1e18;
+                amountOut = (netAmountIn * fixedRate) / 1e18;
             } else {
-                amountOut = (amountInWithFee * 1e18) / fixedRate;
+                amountOut = (netAmountIn * 1e18) / fixedRate;
             }
+
+            require(amountOut > 0, "Insufficient output amount");
+            require(amountOut <= _availableTreasuryBalance(tokenOut), "Insufficient fixed-rate liquidity");
+            require(amountOut >= minAmountOut, "Slippage exceeded");
+
+            _pushTokens(tokenOut, msg.sender, amountOut);
+
+            emit Swap(msg.sender, tokenIn, tokenOut, receivedIn, amountOut, fee);
+            return amountOut;
         } else {
             // AMM swap
+            uint256 reserveIn = reserves[tokenIn][tokenOut];
+            uint256 reserveOut = reserves[tokenOut][tokenIn];
+
+            require(reserveIn > 0 && reserveOut > 0, "Insufficient liquidity");
+
             amountOut = (amountInWithFee * reserveOut) / (reserveIn * 10000 + amountInWithFee);
+
+            require(amountOut > 0, "Insufficient output amount");
+            require(amountOut < reserveOut, "Insufficient liquidity for swap");
+            require(amountOut >= minAmountOut, "Slippage exceeded");
+
+            // CEI: Update reserves before pushing output
+            reserves[tokenIn][tokenOut] += receivedIn;
+            reserves[tokenOut][tokenIn] -= amountOut;
+
+            _pushTokens(tokenOut, msg.sender, amountOut);
         }
-        
-        require(amountOut > 0, "Insufficient output amount");
-        require(amountOut < reserveOut, "Insufficient liquidity for swap");
-        require(amountOut >= minAmountOut, "Slippage exceeded");
-
-        // CEI: Update reserves before pushing output
-        reserves[tokenIn][tokenOut] += receivedIn;
-        reserves[tokenOut][tokenIn] -= amountOut;
-
-        // Push output
-        _pushTokens(tokenOut, msg.sender, amountOut);
         
         emit Swap(msg.sender, tokenIn, tokenOut, receivedIn, amountOut, fee);
     }
@@ -374,13 +410,6 @@ contract LiteforgeSwap {
         require(supportedTokens[tokenIn] && supportedTokens[tokenOut], "Token not supported");
         require(amountIn > 0, "Amount must be greater than 0");
         
-        uint256 reserveIn = reserves[tokenIn][tokenOut];
-        uint256 reserveOut = reserves[tokenOut][tokenIn];
-
-        if (reserveIn == 0 || reserveOut == 0) {
-            return (0, 0);
-        }
-
         fee = amountIn * feePercentage / 10000;
         uint256 amountInWithFee = amountIn * (10000 - feePercentage);
 
@@ -392,12 +421,24 @@ contract LiteforgeSwap {
         }
 
         if (fixedRate > 0) {
+            uint256 netAmountIn = amountInWithFee / 10000;
             if (_isNative(tokenIn)) {
-                amountOut = (amountInWithFee * fixedRate) / 1e18;
+                amountOut = (netAmountIn * fixedRate) / 1e18;
             } else {
-                amountOut = (amountInWithFee * 1e18) / fixedRate;
+                amountOut = (netAmountIn * 1e18) / fixedRate;
+            }
+
+            if (amountOut > _availableTreasuryBalance(tokenOut)) {
+                return (0, fee);
             }
         } else {
+            uint256 reserveIn = reserves[tokenIn][tokenOut];
+            uint256 reserveOut = reserves[tokenOut][tokenIn];
+
+            if (reserveIn == 0 || reserveOut == 0) {
+                return (0, 0);
+            }
+
             amountOut = (amountInWithFee * reserveOut) / (reserveIn * 10000 + amountInWithFee);
         }
     }

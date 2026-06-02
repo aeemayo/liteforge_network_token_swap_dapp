@@ -109,6 +109,30 @@ const normalizeChainId = (value: unknown): number | null => {
   return null;
 };
 
+const getErrorCode = (error: unknown): unknown => {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    return (error as { code?: unknown }).code;
+  }
+
+  return undefined;
+};
+
+const getErrorReason = (error: unknown): string => {
+  if (typeof error !== 'object' || error === null) {
+    return '';
+  }
+
+  const maybeError = error as { reason?: unknown; message?: unknown };
+  if (typeof maybeError.reason === 'string') {
+    return maybeError.reason;
+  }
+  if (typeof maybeError.message === 'string') {
+    return maybeError.message;
+  }
+
+  return '';
+};
+
 export const getSwapContractAddress = (): string => {
   const address = import.meta.env.VITE_SWAP_CONTRACT_ADDRESS;
   if (!address) {
@@ -155,9 +179,9 @@ export const switchToLiteforgeNetwork = async (): Promise<void> => {
       method: 'wallet_switchEthereumChain',
       params: [{ chainId: chainIdHex }],
     });
-  } catch (switchError: any) {
+  } catch (switchError: unknown) {
     // 4001 is the user rejecting the request. Don't prompt to add if they rejected switching.
-    if (switchError?.code === 4001) {
+    if (getErrorCode(switchError) === 4001) {
       throw new Error('User rejected network switch.');
     }
 
@@ -180,8 +204,8 @@ export const switchToLiteforgeNetwork = async (): Promise<void> => {
           },
         ],
       });
-    } catch (addError: any) {
-      if (addError?.code === 4001) {
+    } catch (addError: unknown) {
+      if (getErrorCode(addError) === 4001) {
          throw new Error('User rejected adding the network.');
       }
       throw new Error('Failed to add Liteforge network to wallet.');
@@ -198,7 +222,7 @@ export const ensureCorrectNetwork = async (): Promise<void> => {
       if (chainId !== LITEFORGE_CHAIN_ID) {
         throw new Error(`Wrong network. Switch to chain ID ${LITEFORGE_CHAIN_ID}.`);
       }
-    } catch (err) {
+    } catch {
       throw new Error(`Wrong network. Switch to chain ID ${LITEFORGE_CHAIN_ID}.`);
     }
   }
@@ -638,21 +662,9 @@ export const getSwapQuote = async (
     throw err;
   }
 
-  if (amountOutWei <= 0n) {
-    throw new Error(
-      'No liquidity available for this pair. Add liquidity to the ' +
-      `${tokenIn.symbol}/${tokenOut.symbol} pool before swapping.`
-    );
-  }
-
   let reserveInWei = 0n;
   let reserveOutWei = 0n;
   let isFixedRate = false;
-  try {
-    [reserveInWei, reserveOutWei] = await swapContract.getReserves(tokenIn.address, tokenOut.address) as [bigint, bigint];
-  } catch {
-    // Non-critical — price impact will just show 0
-  }
 
   if (tokenIn.isNative || tokenOut.isNative) {
     const fixedRateToken = tokenIn.isNative ? tokenOut.address : tokenIn.address;
@@ -662,6 +674,26 @@ export const getSwapQuote = async (
     } catch {
       isFixedRate = false;
     }
+  }
+
+  if (amountOutWei <= 0n) {
+    if (isFixedRate) {
+      throw new Error(
+        'No fixed-rate treasury liquidity is available for this pair. ' +
+        `Ask the contract owner to fund ${tokenOut.symbol}.`
+      );
+    }
+
+    throw new Error(
+      'No liquidity available for this pair. Add liquidity to the ' +
+      `${tokenIn.symbol}/${tokenOut.symbol} pool before swapping.`
+    );
+  }
+
+  try {
+    [reserveInWei, reserveOutWei] = await swapContract.getReserves(tokenIn.address, tokenOut.address) as [bigint, bigint];
+  } catch {
+    // Non-critical — price impact will just show 0
   }
 
   const amountOut = toDisplayAmount(amountOutWei, tokenOut.decimals);
@@ -814,6 +846,8 @@ const ensureTokensRegistered = async (
 ): Promise<void> => {
   const contractAddress = getSwapContractAddress();
   const swapContract = new ethers.Contract(contractAddress, SWAP_CONTRACT_ABI, signer);
+  const signerAddress = ethers.getAddress(await signer.getAddress());
+  let contractOwner: string | null = null;
 
   for (const token of tokens) {
     // Check if already supported — if the view call fails, assume not supported
@@ -826,6 +860,17 @@ const ensureTokensRegistered = async (
     }
     if (isSupported) continue;
 
+    if (!contractOwner) {
+      contractOwner = ethers.getAddress((await swapContract.owner()) as string);
+    }
+
+    if (signerAddress !== contractOwner) {
+      throw new Error(
+        `${token.symbol} is not registered on the swap contract. ` +
+        'Ask the contract owner to register this token.'
+      );
+    }
+
     // Attempt auto-registration — will revert if the signer is not the owner
     try {
       const tx = await swapContract.addSupportedToken(token.address, token.symbol);
@@ -833,9 +878,9 @@ const ensureTokensRegistered = async (
       if (!receipt || receipt.status !== 1) {
         throw new Error(`Failed to register ${token.symbol} on the swap contract.`);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       // If the signer is not the owner, the contract will revert
-      const reason = err?.reason || err?.message || '';
+      const reason = getErrorReason(err);
       if (reason.includes('Only owner')) {
         throw new Error(
           `${token.symbol} is not registered on the swap contract and your wallet is not the contract owner. ` +
