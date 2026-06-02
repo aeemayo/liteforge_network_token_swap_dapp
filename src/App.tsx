@@ -1,11 +1,10 @@
-import { Zap, Github, Twitter, MessageCircle, TrendingUp, Shield, Droplets, Loader2, CheckCircle, Activity } from 'lucide-react';
+import { Zap, Github, Twitter, MessageCircle, Loader2, CheckCircle } from 'lucide-react';
 import { WalletConnect } from './components/WalletConnect';
 import { SwapInterface } from './components/SwapInterface';
 import { LiquidityPool } from './components/LiquidityPool';
 import { AddLiquidity } from './components/AddLiquidity';
 import { useWallet } from './hooks/useWallet';
 import { useTokens } from './hooks/useTokens';
-import { useAnalytics, formatStatValue } from './hooks/useAnalytics';
 
 function App() {
   const { wallet, connecting, error, connect, disconnect } = useWallet();
@@ -13,10 +12,6 @@ function App() {
     wallet.connected,
     wallet.address,
     wallet.chainId
-  );
-  const { analytics, analyticsLoading } = useAnalytics(
-    wallet.connected,
-    availableTokens,
   );
 
   return (
@@ -53,9 +48,6 @@ function App() {
               </a>
               <a href="#pools" className="text-[#A3A3A3] hover:text-[#9E7FFF] transition-colors">
                 Pools
-              </a>
-              <a href="#analytics" className="text-[#A3A3A3] hover:text-[#9E7FFF] transition-colors">
-                Analytics
               </a>
             </nav>
 
@@ -97,91 +89,6 @@ function App() {
             Swap zkLTC to any registered token or sell tokens back for zkLTC instantly on Liteforge
           </p>
         </div>
-
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-12">
-          {/* Total Swaps */}
-          <div className="p-5 bg-[#262626] rounded-xl border border-[#2F2F2F] backdrop-blur-xl bg-opacity-80 group hover:border-[#9E7FFF]/40 transition-all duration-300">
-            <div className="flex items-center gap-3 mb-2">
-              <Shield className="w-5 h-5 text-[#9E7FFF]" />
-              <span className="text-sm text-[#A3A3A3]">Total Swaps</span>
-              {analyticsLoading && <Loader2 className="w-3 h-3 text-[#A3A3A3] animate-spin ml-auto" />}
-            </div>
-            <div className="text-2xl font-bold text-[#FFFFFF]">
-              {wallet.connected ? analytics.totalSwaps.toLocaleString() : '—'}
-            </div>
-            {wallet.connected && analytics.swaps24h > 0 && (
-              <div className="text-xs text-[#10b981] mt-1 flex items-center gap-1">
-                <Activity className="w-3 h-3" />
-                {analytics.swaps24h} in last 24h
-              </div>
-            )}
-            {!wallet.connected && (
-              <div className="text-xs text-[#A3A3A3] mt-1">Connect wallet to view</div>
-            )}
-          </div>
-
-          {/* TVL in zkLTC */}
-          <div className="p-5 bg-[#262626] rounded-xl border border-[#2F2F2F] backdrop-blur-xl bg-opacity-80 group hover:border-[#38bdf8]/40 transition-all duration-300">
-            <div className="flex items-center gap-3 mb-2">
-              <Droplets className="w-5 h-5 text-[#38bdf8]" />
-              <span className="text-sm text-[#A3A3A3]">TVL (zkLTC)</span>
-              {analyticsLoading && <Loader2 className="w-3 h-3 text-[#A3A3A3] animate-spin ml-auto" />}
-            </div>
-            <div className="text-2xl font-bold text-[#FFFFFF]">
-              {wallet.connected
-                ? formatStatValue(parseFloat(analytics.tvlNative)) + ' zkLTC'
-                : '—'}
-            </div>
-            {wallet.connected && (
-              <div className="text-xs text-[#A3A3A3] mt-1">Across all pools</div>
-            )}
-            {!wallet.connected && (
-              <div className="text-xs text-[#A3A3A3] mt-1">Connect wallet to view</div>
-            )}
-          </div>
-
-          {/* 24h Volume */}
-          <div className="p-5 bg-[#262626] rounded-xl border border-[#2F2F2F] backdrop-blur-xl bg-opacity-80 group hover:border-[#10b981]/40 transition-all duration-300">
-            <div className="flex items-center gap-3 mb-2">
-              <TrendingUp className="w-5 h-5 text-[#10b981]" />
-              <span className="text-sm text-[#A3A3A3]">24h Volume</span>
-              {analyticsLoading && <Loader2 className="w-3 h-3 text-[#A3A3A3] animate-spin ml-auto" />}
-            </div>
-            <div className="text-2xl font-bold text-[#FFFFFF]">
-              {wallet.connected
-                ? formatStatValue(parseFloat(analytics.volume24h)) + ' zkLTC'
-                : '—'}
-            </div>
-            {wallet.connected && analytics.swaps24h > 0 && (
-              <div className="text-xs text-[#10b981] mt-1">
-                {analytics.swaps24h} swap{analytics.swaps24h !== 1 ? 's' : ''}
-              </div>
-            )}
-            {!wallet.connected && (
-              <div className="text-xs text-[#A3A3A3] mt-1">Connect wallet to view</div>
-            )}
-          </div>
-
-          {/* Active Pools */}
-          <div className="p-5 bg-[#262626] rounded-xl border border-[#2F2F2F] backdrop-blur-xl bg-opacity-80 group hover:border-[#f472b6]/40 transition-all duration-300">
-            <div className="flex items-center gap-3 mb-2">
-              <Droplets className="w-5 h-5 text-[#f472b6]" />
-              <span className="text-sm text-[#A3A3A3]">Active Pools</span>
-              {analyticsLoading && <Loader2 className="w-3 h-3 text-[#A3A3A3] animate-spin ml-auto" />}
-            </div>
-            <div className="text-2xl font-bold text-[#FFFFFF]">
-              {wallet.connected ? analytics.activePools : '—'}
-            </div>
-            {wallet.connected && (
-              <div className="text-xs text-[#A3A3A3] mt-1">With liquidity</div>
-            )}
-            {!wallet.connected && (
-              <div className="text-xs text-[#A3A3A3] mt-1">Connect wallet to view</div>
-            )}
-          </div>
-        </div>
-
 
         {/* Swap Interface */}
         <div id="swap" className="flex justify-center mb-12">
