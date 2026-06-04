@@ -1,6 +1,6 @@
-# Liteforge Swap
+# Lite Swap
 
-Liteforge Swap is a clean, fast token swap experience for the Liteforge ecosystem.
+Lite Swap is a clean, fast token swap experience for the Liteforge ecosystem.
 
 It is designed to feel simple for first-time users while still looking and behaving like a modern DEX product.
 

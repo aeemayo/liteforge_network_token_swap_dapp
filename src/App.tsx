@@ -36,7 +36,7 @@ function App() {
               </div>
               <div>
                 <h1 className="text-2xl font-bold bg-gradient-to-r from-[#9E7FFF] to-[#38bdf8] bg-clip-text text-transparent">
-                  Liteforge Swap
+                  Lite Swap
                 </h1>
                 <p className="text-xs text-[#A3A3A3]">Decentralized Exchange</p>
               </div>
@@ -69,7 +69,7 @@ function App() {
         <div className="text-center mb-12">
           <div className="inline-flex items-center gap-2 px-4 py-2 bg-[#262626] rounded-full border border-[#2F2F2F] mb-6">
             <div className="w-2 h-2 bg-[#10b981] rounded-full animate-pulse" />
-            <span className="text-sm text-[#A3A3A3]">Liteforge Network • Live</span>
+            <span className="text-sm text-[#A3A3A3]">Lite Swap Network • Live</span>
           </div>
           {wallet.connected && syncing && (
             <div className="inline-flex items-center gap-2 px-4 py-2 bg-[#262626] rounded-full border border-[#2F2F2F] mb-6 ml-2">
@@ -87,7 +87,7 @@ function App() {
             Trade Tokens Instantly
           </h2>
           <p className="text-xl text-[#A3A3A3] max-w-2xl mx-auto">
-            Swap zkLTC to any registered token or sell tokens back for zkLTC instantly on Liteforge
+            Swap zkLTC to any registered token or sell tokens back for zkLTC instantly on Lite Swap
           </p>
         </div>
 
@@ -128,7 +128,7 @@ function App() {
                 <div className="p-2 bg-gradient-to-r from-[#9E7FFF] to-[#38bdf8] rounded-xl">
                   <Zap className="w-5 h-5 text-white" />
                 </div>
-                <span className="text-xl font-bold">Liteforge Swap</span>
+                <span className="text-xl font-bold">Lite Swap</span>
               </div>
               <div className="flex items-center gap-4">
                 <a href="https://x.com/aeemayo" target="_blank" rel="noopener noreferrer" aria-label="Twitter" title="Twitter" className="p-2 bg-[#262626] hover:bg-[#2F2F2F] rounded-lg transition-colors">
@@ -154,14 +154,14 @@ function App() {
             <div className="flex justify-center md:justify-start items-center">
               <img 
                 src="/favicon.svg" 
-                alt="Liteforge Swap Logo" 
+                alt="Lite Swap Logo" 
                 className="w-24 h-24 opacity-50 hover:opacity-100 transition-opacity duration-300 drop-shadow-md filter" 
               />
             </div>
           </div>
 
           <div className="border-t border-[#2F2F2F] mt-8 pt-8 text-center text-[#A3A3A3] text-sm">
-            <p>© 2026 Liteforge Swap. All rights reserved.</p>
+            <p>© 2026 Lite Swap. All rights reserved.</p>
           </div>
         </div>
       </footer>
