@@ -69,7 +69,7 @@ function App() {
         <div className="text-center mb-12">
           <div className="inline-flex items-center gap-2 px-4 py-2 bg-[#262626] rounded-full border border-[#2F2F2F] mb-6">
             <div className="w-2 h-2 bg-[#10b981] rounded-full animate-pulse" />
-            <span className="text-sm text-[#A3A3A3]">Lite Swap Network • Live</span>
+            <span className="text-sm text-[#A3A3A3]">Lite Swap Protocol • Live</span>
           </div>
           {wallet.connected && syncing && (
             <div className="inline-flex items-center gap-2 px-4 py-2 bg-[#262626] rounded-full border border-[#2F2F2F] mb-6 ml-2">
